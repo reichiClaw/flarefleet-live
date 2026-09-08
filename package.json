@@ -11,7 +11,8 @@
     "cf-typegen": "wrangler types worker/worker-configuration.d.ts",
     "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
-    "db:migrate": "wrangler d1 migrations apply DB --remote --config wrangler.jsonc",
+    "resolve:bindings": "node scripts/resolve-bindings.mjs",
+    "db:migrate": "npm run resolve:bindings && wrangler d1 migrations apply DB --remote --config wrangler.jsonc",
     "deploy": "npm run db:migrate && npm run build && wrangler deploy",
     "tail": "wrangler tail"
   },

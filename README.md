@@ -71,7 +71,7 @@ worker/            Hono API, Durable Object, cron handlers
 web/               React SPA (pages, components, i18n, api client)
 shared/            types, Zod schemas, status machine and capability rules (used by both sides)
 migrations/        D1 SQL migrations
-scripts/           setup-cloudflare.mjs installer
+scripts/           setup-cloudflare.mjs installer, resolve-bindings.mjs (fills resource ids before deploy)
 docs/              Specification (design target; see note below)
 wrangler.jsonc     Worker configuration and bindings
 ```
@@ -120,8 +120,28 @@ enabled once on your account (dashboard → R2 Object Storage → Get started,
 free). If the first build fails with an R2 error, enable R2 and hit *Retry
 build* in Workers & Pages → your Worker → Deployments.
 
-To pull later FlareFleet updates into your copy, add this repository as a
-git remote and merge; Workers Builds deploys on push.
+#### Updating a Deploy-button copy
+
+Your copy differs from this repository in exactly one file: `wrangler.jsonc`
+holds the ids of *your* D1 database and KV namespace. Pull updates with a
+merge, not a force-push, so that file keeps your ids:
+
+```bash
+git remote add upstream https://github.com/reichiClaw/FlareFleet.git
+git fetch upstream
+git merge upstream/main        # keep your wrangler.jsonc if it conflicts
+git push                       # Workers Builds deploys
+```
+
+If the ids do get lost (for example after force-pushing upstream over your
+copy), the deploy does not break: `npm run deploy` first runs
+`scripts/resolve-bindings.mjs`, which fills placeholders from, in order, the
+build variables `D1_DATABASE_ID` / `KV_NAMESPACE_ID` / `R2_BUCKET_NAME`, the
+bindings of the currently deployed Worker, existing resources with the
+configured names, and only as a last resort creates new ones. To pin your
+resources explicitly, set those three variables under **Workers & Pages →
+your Worker → Settings → Build → Variables** (ids are shown under **Settings
+→ Bindings**).
 
 ### Option B: Installer script
 
@@ -324,6 +344,7 @@ real cause is in the Worker logs: dashboard → Workers & Pages → your Worker 
 | Symptom / log line | Cause | Fix |
 |---|---|---|
 | `no such table: users` | Migrations not applied | `npm run db:migrate` (Deploy button: check the build log of the deploy step) |
+| `Invalid property: databaseId => Invalid uuid` in the deploy log | `wrangler.jsonc` still has placeholder ids (e.g. after force-updating a copy) | Fixed automatically by `npm run deploy` since the resolver step; or paste the ids from **Settings → Bindings** into `wrangler.jsonc` |
 | `Pbkdf2 failed: iterations too high` | `PBKDF2_ITERATIONS` above 100000 | Set it to 100000 or less (default 20000) |
 | `Worker exceeded CPU time limit` on login/setup | `PBKDF2_ITERATIONS` too high for the free plan | Lower it to 20000 |
 | `E_SENDER_NOT_VERIFIED` / `E_SENDER_DOMAIN_NOT_AVAILABLE` | Sender domain not onboarded in Email Service | Onboard the domain or set `EMAIL_ENABLED` to `false` |
@@ -361,6 +382,7 @@ Useful scripts:
 | `npm run preview` | serve the production build locally |
 | `npm run cf-typegen` | regenerate Worker binding types from `wrangler.jsonc` |
 | `npm run setup:cloudflare` | guided Cloudflare installer (see deployment manual) |
+| `npm run resolve:bindings` | fill placeholder resource ids in `wrangler.jsonc` (runs automatically in `db:migrate`/`deploy`) |
 
 ## Using the app (quick tour)
 

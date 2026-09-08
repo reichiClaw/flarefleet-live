@@ -13,12 +13,10 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
+import { resolveBindings, wrangler as wranglerRaw } from "./resolve-bindings.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = resolve(ROOT, "wrangler.jsonc");
-const DB_NAME = "flarefleet-db";
-const BUCKET_NAME = "flarefleet-media";
-const KV_BINDING = "KV";
 
 const args = parseArgs(process.argv.slice(2));
 const nonInteractive = !!args.yes;
@@ -51,7 +49,7 @@ const c = {
   red: (s) => `\x1b[31m${s}\x1b[0m`,
   dim: (s) => `\x1b[2m${s}\x1b[0m`,
 };
-const step = (n, msg) => console.log(`\n${c.bold(`[${n}/7] ${msg}`)}`);
+const step = (n, msg) => console.log(`\n${c.bold(`[${n}/5] ${msg}`)}`);
 const ok = (msg) => console.log(`  ${c.green("✔")} ${msg}`);
 const warn = (msg) => console.log(`  ${c.yellow("!")} ${msg}`);
 const fail = (msg) => {
@@ -88,34 +86,11 @@ async function confirm(question, fallback = true) {
   return answer.startsWith("y") || answer.startsWith("j");
 }
 
-function wrangler(cmdArgs, { inherit = false, allowFail = false } = {}) {
-  const bin = process.platform === "win32" ? "npx.cmd" : "npx";
-  const res = spawnSync(bin, ["wrangler", ...cmdArgs], {
-    cwd: ROOT,
-    encoding: "utf8",
-    stdio: inherit ? "inherit" : ["inherit", "pipe", "pipe"],
-    shell: process.platform === "win32",
-    env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-  });
-  const stdoutText = res.stdout ?? "";
-  const stderrText = res.stderr ?? "";
-  if (res.status !== 0 && !allowFail) {
-    console.error(stdoutText);
-    console.error(stderrText);
-    fail(`wrangler ${cmdArgs.join(" ")} failed`);
-  }
-  return { status: res.status, stdout: stdoutText, stderr: stderrText, text: stdoutText + "\n" + stderrText };
-}
-
-function extractJson(text) {
-  // wrangler prints banners around JSON output; grab the outermost array/object.
-  const start = Math.min(...["[", "{"].map((ch) => text.indexOf(ch)).filter((i) => i >= 0));
-  if (!Number.isFinite(start)) return null;
-  const end = Math.max(text.lastIndexOf("]"), text.lastIndexOf("}"));
+function wrangler(cmdArgs, opts = {}) {
   try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
+    return wranglerRaw(cmdArgs, opts);
+  } catch (err) {
+    fail(err.message);
   }
 }
 
@@ -158,61 +133,18 @@ if (who.status !== 0 || /not authenticated|You are not logged in/i.test(who.text
 const accountLine = who.text.split("\n").find((l) => /│.*│.*│/.test(l) && !/Account Name/i.test(l));
 ok(accountLine ? `Logged in (${accountLine.replace(/│/g, "|").replace(/\s+/g, " ").trim()})` : "Logged in");
 
-// 2. D1 --------------------------------------------------------------------
-step(2, `D1 database "${DB_NAME}"`);
-let dbId = null;
-const d1List = extractJson(wrangler(["d1", "list", "--json"]).stdout) ?? [];
-const existingDb = Array.isArray(d1List) ? d1List.find((d) => d.name === DB_NAME) : null;
-if (existingDb) {
-  dbId = existingDb.uuid;
-  ok(`Reusing existing database ${dbId}`);
-} else {
-  const created = wrangler(["d1", "create", DB_NAME]);
-  const m = created.text.match(/"database_id"\s*:\s*"([0-9a-f-]{36})"/i) ?? created.text.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-  if (!m) fail("Could not read the database id from wrangler output:\n" + created.text);
-  dbId = m[1];
-  ok(`Created database ${dbId}`);
-}
-config = config.replace(/("database_id"\s*:\s*)"[^"]*"/, `$1"${dbId}"`);
-
-// 3. KV --------------------------------------------------------------------
-step(3, `KV namespace "${name}-${KV_BINDING}"`);
-let kvId = null;
-const kvList = extractJson(wrangler(["kv", "namespace", "list"]).stdout) ?? [];
-const existingKv = Array.isArray(kvList) ? kvList.find((n) => n.title === `${name}-${KV_BINDING}`) : null;
-if (existingKv) {
-  kvId = existingKv.id;
-  ok(`Reusing existing namespace ${kvId}`);
-} else {
-  const created = wrangler(["kv", "namespace", "create", KV_BINDING], { allowFail: true });
-  const m = created.text.match(/"id"\s*:\s*"([0-9a-f]{32})"/i) ?? created.text.match(/\b([0-9a-f]{32})\b/i);
-  if (created.status !== 0 || !m) {
-    console.error(created.text);
-    fail("Could not create the KV namespace. If it already exists, copy its id from the dashboard into wrangler.jsonc and re-run.");
-  }
-  kvId = m[1];
-  ok(`Created namespace ${kvId}`);
-}
-config = config.replace(/("kv_namespaces"[\s\S]*?"binding"\s*:\s*"KV"[\s\S]*?"id"\s*:\s*)"[^"]*"/, `$1"${kvId}"`);
-
-// 4. R2 --------------------------------------------------------------------
-step(4, `R2 bucket "${BUCKET_NAME}"`);
-const r2 = wrangler(["r2", "bucket", "create", BUCKET_NAME], { allowFail: true });
-if (r2.status === 0) ok("Created bucket");
-else if (/already exists|already own|10004/i.test(r2.text)) ok("Reusing existing bucket");
-else if (/not enabled|enable R2|Please enable|10042/i.test(r2.text)) {
-  fail(
-    "R2 is not enabled on this account yet.\n" +
-      "  Open https://dash.cloudflare.com → R2 Object Storage → Get started (free tier, one-time activation),\n" +
-      "  then run this script again.",
-  );
-} else {
-  console.error(r2.text);
-  fail("Could not create the R2 bucket");
+// 2. Resources -------------------------------------------------------------
+step(2, "D1 database, KV namespace, R2 bucket");
+try {
+  const r = await resolveBindings({ log: (m) => ok(m) });
+  if (!r.created.length && !Object.keys(r.sources).length) ok("wrangler.jsonc already points at existing resources");
+  config = readConfig();
+} catch (err) {
+  fail(err.message);
 }
 
-// 5. Variables -------------------------------------------------------------
-step(5, "Application settings");
+// 3. Variables -------------------------------------------------------------
+step(3, "Application settings");
 const currentBase = getVar(config, "PUBLIC_BASE_URL");
 const currentFrom = getVar(config, "EMAIL_FROM");
 const currentEnabled = getVar(config, "EMAIL_ENABLED") !== "false";
@@ -243,13 +175,13 @@ if (emailEnabled) {
   );
 }
 
-// 6. Migrations ------------------------------------------------------------
-step(6, "Applying D1 migrations (remote)");
+// 4. Migrations ------------------------------------------------------------
+step(4, "Applying D1 migrations (remote)");
 wrangler(["d1", "migrations", "apply", "DB", "--remote", "--config", "wrangler.jsonc"], { inherit: true });
 ok("Schema is up to date");
 
-// 7. Deploy ----------------------------------------------------------------
-step(7, "Build and deploy");
+// 5. Deploy ----------------------------------------------------------------
+step(5, "Build and deploy");
 if (args.skipDeploy) {
   warn("Skipped (--skip-deploy). Run `npm run deploy` when ready.");
 } else {
