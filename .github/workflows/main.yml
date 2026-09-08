@@ -1,0 +1,24 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Läuft jeden Tag um Mitternacht
+  workflow_dispatch: # Erlaubt es dir, den Sync jederzeit manuell per Klick zu starten
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync upstream
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
+        with:
+          target_sync_branch: main
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          upstream_sync_branch: main
+          upstream_sync_repo: reichiClaw/FlareFleet # <--- HIER ANPASSEN!
+          test_mode: false
