@@ -192,6 +192,7 @@ export const SettingsSchema = z
     default_loan_days: z.number().int().min(1).max(365),
     public_qr_page: z.boolean(),
     email_enabled: z.boolean(),
+    email_from: z.string().trim().max(200).refine((v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Invalid email"),
     overdue_digest_recipients: z.string().trim().max(1000),
     pdf_footer: z.string().trim().max(500),
   })

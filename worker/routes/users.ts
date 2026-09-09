@@ -34,7 +34,7 @@ users.post("/", async (c) => {
   const id = uid();
   const ts = now();
   const settings = await loadSettings(c.env);
-  const canEmail = input.send_invite && emailAvailable(c.env) && settings.email_enabled;
+  const canEmail = input.send_invite && emailAvailable(c.env, settings);
   const tempPassword = canEmail ? null : generatePassword();
   await stmt(
     c.env.DB,
@@ -101,7 +101,7 @@ users.post("/:id/reset-password", async (c) => {
   if (!target) throw notFound();
   if (target.role === "super_admin" && actor.role !== "super_admin") throw new ApiError(403, "role_not_allowed");
   const settings = await loadSettings(c.env);
-  const canEmail = emailAvailable(c.env) && settings.email_enabled;
+  const canEmail = emailAvailable(c.env, settings);
   let tempPassword: string | null = null;
   let emailed = false;
   if (canEmail) {

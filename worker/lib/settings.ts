@@ -1,6 +1,7 @@
 import type { Language, PublicSettings, Settings } from "@shared/types";
 import type { Env } from "../env";
 import { all, now, stmt } from "./db";
+import { emailAvailable } from "./email";
 
 export const DEFAULT_SETTINGS: Settings = {
   org_name: "FlareFleet",
@@ -16,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   default_loan_days: 7,
   public_qr_page: true,
   email_enabled: true,
+  email_from: "",
   overdue_digest_recipients: "",
   pdf_footer: "",
 };
@@ -64,8 +66,8 @@ export async function saveSettings(env: Env, patch: Partial<Settings>, actorId: 
 }
 
 export function publicSettings(s: Settings, env: Env): PublicSettings {
-  const { overdue_digest_recipients: _a, pdf_footer: _b, ...pub } = s;
-  return { ...pub, email_enabled: s.email_enabled && env.EMAIL_ENABLED !== "false" && !!env.EMAIL };
+  const { overdue_digest_recipients: _a, pdf_footer: _b, email_from: _c, ...pub } = s;
+  return { ...pub, email_enabled: emailAvailable(env, s) };
 }
 
 export function settingsLanguage(s: Settings): Language {

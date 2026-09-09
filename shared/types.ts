@@ -70,6 +70,7 @@ export interface PublicSettings {
 }
 
 export interface Settings extends PublicSettings {
+  email_from: string;
   overdue_digest_recipients: string;
   pdf_footer: string;
 }

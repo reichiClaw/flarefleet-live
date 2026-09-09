@@ -100,10 +100,10 @@ account. Cloudflare then:
 1. Copies this repository into a new repository on your account (you own the
    code and can keep developing).
 2. Shows one configuration page: Worker name, names for the D1 database, KV
-   namespace and R2 bucket, and the variables `EMAIL_FROM` / `EMAIL_ENABLED`
-   (`PUBLIC_BASE_URL` can stay empty). Each field carries a short
-   description. Set `EMAIL_ENABLED` to `false` if you have not onboarded a
-   sending domain yet; you can switch it on later.
+   namespace and R2 bucket, and a few variables. All of them can stay at
+   their defaults: the public URL is recorded at first-run setup and the
+   e-mail sender is configured later inside the app (Settings → E-mail, see
+   "Enable e-mail" below).
 3. Provisions the D1 database, KV namespace, R2 bucket and the `VehicleLock`
    Durable Object, writes their ids into `wrangler.jsonc` in your new
    repository, runs the D1 migrations (part of the `deploy` script), builds
@@ -228,8 +228,8 @@ and set the variables:
 "vars": {
   "APP_NAME": "FlareFleet",
   "PUBLIC_BASE_URL": "",                  // empty = recorded automatically at first-run setup; set for a custom domain
-  "EMAIL_FROM": "fleet@yourdomain.com",   // must be on a domain onboarded in Email Service (step 5)
-  "EMAIL_ENABLED": "true"                 // "false" if you skip e-mail for now
+  "EMAIL_FROM": "",                       // optional default sender; normally set in the app (step 5)
+  "EMAIL_ENABLED": "true"                 // "false" hard-disables e-mail regardless of app settings
 }
 ```
 
@@ -255,14 +255,29 @@ dashboard, no code or secrets required:
 2. **Onboard Domain** → pick the domain you want to send from (it must use
    Cloudflare DNS). Cloudflare adds the required MX/SPF/DKIM/DMARC records
    to a `cf-bounce` subdomain automatically. Select **Done**.
-3. Make sure `EMAIL_FROM` in `wrangler.jsonc` uses that domain
-   (e.g. `fleet@yourdomain.com`).
+3. In the app, as super admin: **Settings → E-mail → Sender address** → enter
+   an address on that domain (e.g. `fleet@yourdomain.com`), **Save**, then
+   **Send test e-mail to me**. If it arrives, protocol copies (check-in, loan,
+   return, check-out), invitations and password links will be sent.
 
-The `send_email` binding is already declared in `wrangler.jsonc`. If you skip
-this step, set `EMAIL_ENABLED` to `"false"`; the app then shows temporary
-passwords on screen instead of mailing them, and everything else works
-normally. You can verify delivery later from **Settings → Send test e-mail**
-inside the app.
+The `send_email` binding is already declared in `wrangler.jsonc`; nothing
+needs to be redeployed for this step. Until a sender address on an onboarded
+domain is configured, the app simply hides the "send copy" fields, shows
+temporary passwords on screen instead of mailing them, and everything else
+works normally. To hard-disable e-mail, set `EMAIL_ENABLED` to `"false"` in
+`wrangler.jsonc` or switch off **E-mail sending enabled** in Settings.
+
+Notes:
+
+- Before a domain is onboarded, Email Service only delivers to
+  **verified destination addresses** of your account
+  (Email Service → Destination addresses). This is what the error
+  `E_RECIPIENT_NOT_ALLOWED` means.
+- `E_SENDER_NOT_VERIFIED` / `E_SENDER_DOMAIN_NOT_AVAILABLE` mean the sender
+  address is not on an onboarded domain — check the address in Settings.
+- Failed protocol copies are recorded in the audit log as
+  `protocol.email_failed` with the error code; the protocol itself is never
+  blocked by a mail failure.
 
 ### 6. Build and deploy
 
@@ -347,7 +362,9 @@ real cause is in the Worker logs: dashboard → Workers & Pages → your Worker 
 | `Invalid property: databaseId => Invalid uuid` in the deploy log | `wrangler.jsonc` still has placeholder ids (e.g. after force-updating a copy) | Fixed automatically by `npm run deploy` since the resolver step; or paste the ids from **Settings → Bindings** into `wrangler.jsonc` |
 | `Pbkdf2 failed: iterations too high` | `PBKDF2_ITERATIONS` above 100000 | Set it to 100000 or less (default 20000) |
 | `Worker exceeded CPU time limit` on login/setup | `PBKDF2_ITERATIONS` too high for the free plan | Lower it to 20000 |
-| `E_SENDER_NOT_VERIFIED` / `E_SENDER_DOMAIN_NOT_AVAILABLE` | Sender domain not onboarded in Email Service | Onboard the domain or set `EMAIL_ENABLED` to `false` |
+| No "send copy" field in return / check-out, no mail sent | No sender address configured | **Settings → E-mail → Sender address** on an onboarded domain, save, "Send test e-mail" |
+| `E_SENDER_NOT_VERIFIED` / `E_SENDER_DOMAIN_NOT_AVAILABLE` (test e-mail or audit `protocol.email_failed`) | Sender domain not onboarded in Email Service | Onboard the domain (Compute → Email Service → Email Sending) and use an address on it |
+| `E_RECIPIENT_NOT_ALLOWED` | Domain not onboarded yet; only verified destination addresses may receive | Onboard the domain, or add the recipient under Email Service → Destination addresses |
 | Uploads fail with an R2 error | R2 not enabled on the account | Enable R2 once in the dashboard, redeploy |
 
 ### Multiple environments (optional)

@@ -36,7 +36,7 @@ async function meResponse(env: Env, user: SessionUser, csrf: string): Promise<Me
 auth.get("/status", async (c) => {
   const row = await one<{ c: number }>(c.env.DB, "SELECT COUNT(*) AS c FROM users");
   const settings = await loadSettings(c.env);
-  return c.json({ needs_setup: (row?.c ?? 0) === 0, org_name: settings.org_name, default_language: settings.default_language, email_enabled: emailAvailable(c.env) });
+  return c.json({ needs_setup: (row?.c ?? 0) === 0, org_name: settings.org_name, default_language: settings.default_language, email_enabled: emailAvailable(c.env, settings) });
 });
 
 const SetupSchema = z.object({
@@ -67,14 +67,14 @@ auth.post("/setup", async (c) => {
       ts,
     ),
     ...(input.org_name
-      ? [stmt(c.env.DB, "INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('org_name', ?, ?, ?)", JSON.stringify(input.org_name), id, ts)]
+      ? [stmt(c.env.DB, "INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES ('org_name', ?, ?, ?)", JSON.stringify(input.org_name), id, ts)]
       : []),
-    stmt(c.env.DB, "INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('default_language', ?, ?, ?)", JSON.stringify(input.language), id, ts),
+    stmt(c.env.DB, "INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES ('default_language', ?, ?, ?)", JSON.stringify(input.language), id, ts),
     // Remember the URL the app was reached at so QR labels and e-mail links work
     // without editing PUBLIC_BASE_URL (Deploy-to-Cloudflare button flow).
     ...(isUsableBaseUrl(c.env.PUBLIC_BASE_URL)
       ? []
-      : [stmt(c.env.DB, "INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('public_base_url', ?, ?, ?)", JSON.stringify(new URL(c.req.url).origin), id, ts)]),
+      : [stmt(c.env.DB, "INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES ('public_base_url', ?, ?, ?)", JSON.stringify(new URL(c.req.url).origin), id, ts)]),
   ]);
   await c.env.KV.delete("settings:v1");
   await audit(c.env.DB, { actor_id: id, actor_label: input.name, action: "system.setup", entity_type: "user", entity_id: id, ip: c.get("ip") });
@@ -160,16 +160,16 @@ auth.post("/forgot-password", async (c) => {
   if (!(await rateLimit(c.env, `forgot:${ip}`, 5, 300))) throw new ApiError(429, "rate_limited");
   const input = await parseBody(c, ForgotPasswordSchema);
   const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE email = ? AND is_active = 1", input.email);
-  if (u && emailAvailable(c.env)) {
+  const settings = await loadSettings(c.env);
+  if (u && emailAvailable(c.env, settings)) {
     const token = randomToken(24);
     await c.env.KV.put(`pwreset:${token}`, u.id, { expirationTtl: 3600 });
-    const settings = await loadSettings(c.env);
     const link = `${settings.public_base_url || c.env.PUBLIC_BASE_URL}/reset-password?token=${token}`;
     await sendEmail(c.env, u.email, t(u.language, "email.reset.subject", { org: settings.org_name }), t(u.language, "email.reset.body", { name: u.name, link }));
     await audit(c.env.DB, { actor_id: u.id, actor_label: u.email, action: "auth.reset_requested", entity_type: "user", entity_id: u.id, ip });
   }
   // Always OK to avoid account enumeration.
-  return c.json({ ok: true, email_enabled: emailAvailable(c.env) });
+  return c.json({ ok: true, email_enabled: emailAvailable(c.env, settings) });
 });
 
 auth.post("/reset-password", async (c) => {

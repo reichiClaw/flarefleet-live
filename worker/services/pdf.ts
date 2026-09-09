@@ -4,7 +4,7 @@ import type { Env } from "../env";
 import { one, stmt } from "../lib/db";
 import { t } from "../lib/i18n";
 import { loadSettings } from "../lib/settings";
-import { sendEmail } from "../lib/email";
+import { sendEmailDetailed } from "../lib/email";
 import { storeGenerated, type MediaRow } from "./media";
 
 interface ProtocolRow {
@@ -355,7 +355,7 @@ export async function finalizeProtocol(env: Env, protocolId: string, copyTo: str
     const settings = await loadSettings(env);
     const vehicle = `${snap.vehicle.internal_number} ${snap.vehicle.manufacturer} ${snap.vehicle.model}`;
     const typeLabel = t(p.language, `protocol.${p.type}`);
-    await sendEmail(
+    const sent = await sendEmailDetailed(
       env,
       copyTo,
       t(p.language, "email.protocol.subject", { org: settings.org_name, type: typeLabel, number: p.number, vehicle }),
@@ -368,11 +368,11 @@ export async function finalizeProtocol(env: Env, protocolId: string, copyTo: str
       crypto.randomUUID(),
       null,
       "system",
-      "protocol.emailed",
+      sent.ok ? "protocol.emailed" : "protocol.email_failed",
       "protocol",
       p.id,
       p.vehicle_id,
-      JSON.stringify({ to: copyTo }),
+      JSON.stringify(sent.ok ? { to: copyTo } : { to: copyTo, error: sent.error }),
       new Date().toISOString(),
     ).run();
   } catch (err) {

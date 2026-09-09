@@ -5,7 +5,7 @@ import { parseBody } from "../lib/validate";
 import { requireAuth } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { loadSettings, saveSettings } from "../lib/settings";
-import { emailAvailable, sendEmail } from "../lib/email";
+import { emailAvailable, emailFrom, sendEmailDetailed } from "../lib/email";
 import { one } from "../lib/db";
 
 const settings = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -18,8 +18,10 @@ settings.get("/", async (c) => {
   return c.json({
     settings: s,
     system: {
-      email_binding: emailAvailable(c.env),
-      email_from: c.env.EMAIL_FROM,
+      email_binding: !!c.env.EMAIL && c.env.EMAIL_ENABLED !== "false",
+      email_available: emailAvailable(c.env, s),
+      email_from: emailFrom(c.env, s),
+      email_from_env: c.env.EMAIL_FROM,
       public_base_url_env: c.env.PUBLIC_BASE_URL,
       users: users?.c ?? 0,
       categories: categories?.c ?? 0,
@@ -38,8 +40,8 @@ settings.put("/", async (c) => {
 settings.post("/test-email", async (c) => {
   const actor = c.get("user");
   const s = await loadSettings(c.env);
-  const ok = await sendEmail(c.env, actor.email, `${s.org_name}: Test`, `E-mail sending works. Sent from ${c.env.APP_NAME} to ${actor.email}.`);
-  return c.json({ ok, available: emailAvailable(c.env) });
+  const r = await sendEmailDetailed(c.env, actor.email, `${s.org_name}: Test`, `E-mail sending works. Sent from ${emailFrom(c.env, s)} to ${actor.email}.`);
+  return c.json({ ok: r.ok, error: r.error ?? null, from: emailFrom(c.env, s), available: emailAvailable(c.env, s) });
 });
 
 export default settings;

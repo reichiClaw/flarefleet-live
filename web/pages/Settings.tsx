@@ -7,7 +7,33 @@ import { Button, Card, ErrorBox, Field, Input, Loading, PageHeader, Select, Text
 
 interface Payload {
   settings: Settings;
-  system: { email_binding: boolean; email_from: string; public_base_url_env: string; users: number; categories: number };
+  system: {
+    email_binding: boolean;
+    email_available: boolean;
+    email_from: string;
+    email_from_env: string;
+    public_base_url_env: string;
+    users: number;
+    categories: number;
+  };
+}
+
+function emailErrorHint(code: string | null, t: (k: string, v?: Record<string, string | number>) => string): string {
+  switch (code) {
+    case "no_binding":
+      return t("settings.email_status_no_binding");
+    case "no_sender":
+      return t("settings.email_status_no_sender");
+    case "disabled":
+      return t("settings.email_err_disabled");
+    case "E_SENDER_NOT_VERIFIED":
+    case "E_SENDER_DOMAIN_NOT_AVAILABLE":
+      return t("settings.email_err_domain");
+    case "E_RECIPIENT_NOT_ALLOWED":
+      return t("settings.email_err_recipient");
+    default:
+      return code ? `(${code})` : "";
+  }
 }
 
 export function SettingsPage() {
@@ -30,8 +56,11 @@ export function SettingsPage() {
     onError: (e) => toast.push(errorMessage(e), "error"),
   });
   const test = useMutation({
-    mutationFn: () => api.post<{ ok: boolean }>("/api/settings/test-email"),
-    onSuccess: (r) => toast.push(r.ok ? t("settings.test_sent") : t("settings.test_failed"), r.ok ? "success" : "error"),
+    mutationFn: () => api.post<{ ok: boolean; error: string | null; from: string }>("/api/settings/test-email"),
+    onSuccess: (r) => {
+      if (r.ok) toast.push(t("settings.test_sent"), "success");
+      else toast.push(`${t("settings.test_failed")} ${emailErrorHint(r.error, t)}`, "error");
+    },
     onError: (e) => toast.push(errorMessage(e), "error"),
   });
 
@@ -93,17 +122,36 @@ export function SettingsPage() {
       </Card>
 
       <Card title={t("settings.email")}>
-        <p className="mb-3 text-sm text-slate-600">
-          {t("settings.email_status", { status: sys.email_binding ? `${t("settings.configured")} (${sys.email_from})` : t("settings.not_configured") })}
+        <p className={`mb-3 text-sm ${sys.email_available ? "text-slate-600" : "text-amber-700"}`}>
+          {sys.email_binding
+            ? sys.email_available
+              ? t("settings.email_status_ok", { from: sys.email_from })
+              : t("settings.email_status_no_sender")
+            : t("settings.email_status_no_binding")}
         </p>
         <div className="space-y-3">
           <Toggle checked={form.email_enabled} onChange={bool("email_enabled")} label={t("settings.email_enabled")} />
+          <Field label={t("settings.email_from")} hint={t("settings.email_from_hint", { env: sys.email_from_env || "–" })}>
+            <Input type="email" value={form.email_from} onChange={str("email_from")} placeholder="fleet@yourdomain.com" />
+          </Field>
           <Field label={t("settings.overdue_digest_recipients")}>
             <Input value={form.overdue_digest_recipients} onChange={str("overdue_digest_recipients")} placeholder="dispo@example.com, chef@example.com" />
           </Field>
-          <Button variant="secondary" onClick={() => test.mutate()} loading={test.isPending} disabled={!sys.email_binding}>
-            {t("settings.test_email")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="secondary" onClick={() => test.mutate()} loading={test.isPending} disabled={!sys.email_binding}>
+              {t("settings.test_email")}
+            </Button>
+            <span className="text-xs text-slate-500">{t("settings.test_email_hint")}</span>
+          </div>
+          <details className="text-sm text-slate-600">
+            <summary className="cursor-pointer font-medium text-slate-700">{t("settings.email_setup_title")}</summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5">
+              <li>{t("settings.email_setup_1")}</li>
+              <li>{t("settings.email_setup_2")}</li>
+              <li>{t("settings.email_setup_3")}</li>
+              <li>{t("settings.email_setup_4")}</li>
+            </ol>
+          </details>
         </div>
       </Card>
 

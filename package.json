@@ -22,7 +22,7 @@
       "KV": { "description": "KV namespace for login sessions and the settings cache." },
       "MEDIA": { "description": "R2 bucket for photos, signatures and generated PDF protocols." },
       "PUBLIC_BASE_URL": { "description": "Leave empty: the app records its own URL on the first-run setup screen. Set it only when you attach a custom domain (e.g. `https://fleet.example.com`)." },
-      "EMAIL_FROM": { "description": "Sender address for invitations, password resets and protocol copies. Its domain must be onboarded under **Compute → Email Service → Email Sending**." },
+      "EMAIL_FROM": { "description": "Optional. Sender address for invitations, password resets and protocol copies; can also be set later in the app under Settings → E-mail. Its domain must be onboarded under **Compute → Email Service → Email Sending**." },
       "EMAIL_ENABLED": { "description": "`true` to send e-mail through Cloudflare Email Service, `false` to run without e-mail (temporary passwords are then shown on screen)." },
       "PBKDF2_ITERATIONS": { "description": "Password hashing cost. Keep `20000` on the Workers Free plan (10 ms CPU limit); up to `100000` on a paid plan." }
     }

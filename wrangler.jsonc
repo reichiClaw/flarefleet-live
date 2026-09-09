@@ -19,8 +19,9 @@
     // Public URL of this deployment (used in QR labels and e-mails). Leave empty to
     // auto-detect it from the first-run setup screen; set it when using a custom domain.
     "PUBLIC_BASE_URL": "",
-    // Sender address for e-mails. Must belong to a domain onboarded in Cloudflare Email Service.
-    "EMAIL_FROM": "fleet@example.com",
+    // Optional default sender address; the super admin can set it in the app (Settings → E-mail).
+    // Must belong to a domain onboarded in Cloudflare Email Service (Compute → Email Service → Email Sending).
+    "EMAIL_FROM": "",
     // Set to "false" to disable e-mail sending entirely.
     "EMAIL_ENABLED": "true",
     // Password hashing cost. Workers cap PBKDF2 at 100000; the free plan's 10 ms CPU
