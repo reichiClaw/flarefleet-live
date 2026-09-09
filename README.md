@@ -360,6 +360,7 @@ real cause is in the Worker logs: dashboard → Workers & Pages → your Worker 
 |---|---|---|
 | `no such table: users` | Migrations not applied | `npm run db:migrate` (Deploy button: check the build log of the deploy step) |
 | `Invalid property: databaseId => Invalid uuid` in the deploy log | `wrangler.jsonc` still has placeholder ids (e.g. after force-updating a copy) | Fixed automatically by `npm run deploy` since the resolver step; or paste the ids from **Settings → Bindings** into `wrangler.jsonc` |
+| `A KV namespace with the title "KV" already exists` in the deploy log | Resolver could not read the deployed Worker's bindings and tried to create a namespace that an earlier run had already created | Fixed by the current resolver (falls back to the existing namespace); otherwise pin it with the build variable `KV_NAMESPACE_ID` |
 | `Pbkdf2 failed: iterations too high` | `PBKDF2_ITERATIONS` above 100000 | Set it to 100000 or less (default 20000) |
 | `Worker exceeded CPU time limit` on login/setup | `PBKDF2_ITERATIONS` too high for the free plan | Lower it to 20000 |
 | No "send copy" field in return / check-out, no mail sent | No sender address configured | **Settings → E-mail → Sender address** on an onboarded domain, save, "Send test e-mail" |
