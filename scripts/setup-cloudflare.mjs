@@ -13,7 +13,7 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
-import { resolveBindings, wrangler as wranglerRaw } from "./resolve-bindings.mjs";
+import { readCustomDomain, resolveBindings, wrangler as wranglerRaw, writeCustomDomain } from "./resolve-bindings.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = resolve(ROOT, "wrangler.jsonc");
@@ -152,6 +152,15 @@ const currentEnabled = getVar(config, "EMAIL_ENABLED") !== "false";
 let baseUrl = args.baseUrl ?? (await ask("Public URL (custom domain, or leave empty to use the workers.dev URL)", /localhost/.test(currentBase) ? "" : currentBase));
 if (baseUrl) baseUrl = baseUrl.replace(/\/+$/, "");
 if (baseUrl && !/^https?:\/\//.test(baseUrl)) baseUrl = `https://${baseUrl}`;
+
+// A custom hostname is attached to the Worker as a Custom Domain (zone must be on Cloudflare).
+const baseHost = baseUrl ? new URL(baseUrl).hostname : "";
+if (baseHost && !/\.workers\.dev$/i.test(baseHost) && baseHost !== "localhost" && readCustomDomain(config) !== baseHost) {
+  if (args.baseUrl || (await confirm(`Attach ${baseHost} to the Worker as a Custom Domain (its zone must be on Cloudflare)?`, true))) {
+    config = writeCustomDomain(config, baseHost);
+    ok(`Custom Domain ${baseHost} will be created on deploy`);
+  }
+}
 
 let emailEnabled = args.emailFrom ? true : args.noEmail ? false : await confirm("Enable e-mail (requires a domain onboarded in Cloudflare Email Service)?", currentEnabled);
 let emailFrom = currentFrom;

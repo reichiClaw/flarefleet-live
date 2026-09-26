@@ -141,7 +141,8 @@ bindings of the currently deployed Worker, existing resources with the
 configured names, and only as a last resort creates new ones. To pin your
 resources explicitly, set those three variables under **Workers & Pages →
 your Worker → Settings → Build → Variables** (ids are shown under **Settings
-→ Bindings**).
+→ Bindings**). The same place takes `CUSTOM_DOMAIN` (e.g.
+`fleet.example.com`) to attach your own hostname, see "Custom domain".
 
 ### Option B: Installer script
 
@@ -319,12 +320,34 @@ Then, as Super Admin:
 
 ### 8. Custom domain (optional)
 
-In the dashboard: **Workers & Pages → flarefleet → Settings → Domains &
-Routes → Add → Custom domain** and enter e.g. `fleet.yourdomain.com` (the
-zone must be on Cloudflare). Then change the public URL to
-`https://fleet.yourdomain.com` either in the app (**Settings → Public URL**,
-takes effect immediately) or via `PUBLIC_BASE_URL` in `wrangler.jsonc`
-followed by `npm run deploy`.
+Prerequisite: the zone (e.g. `yourdomain.com`) is on Cloudflare DNS. Pick
+one of:
+
+- **Deploy button / Workers Builds:** **Workers & Pages → your Worker →
+  Settings → Build → Variables** → add `CUSTOM_DOMAIN` =
+  `fleet.yourdomain.com`, then **Deployments → Retry** (or push a commit).
+  The resolver writes the Custom Domain route into `wrangler.jsonc`, fills
+  an empty `PUBLIC_BASE_URL` with `https://fleet.yourdomain.com`, and
+  `wrangler deploy` creates the DNS record and certificate. This survives
+  force-updates of your copy.
+- **Installer:** `npm run setup:cloudflare` asks for the public URL; a
+  non-`workers.dev` hostname is attached as Custom Domain on confirmation.
+- **Manual:** add `"routes": [{ "pattern": "fleet.yourdomain.com",
+  "custom_domain": true }]` to `wrangler.jsonc` and run `npm run deploy`, or
+  use the dashboard (**Settings → Domains & Routes → Add → Custom domain**).
+
+Afterwards open the app under the new hostname and check **Settings →
+General → Public URL**: if the first-run setup recorded the `workers.dev`
+address there, replace it with `https://fleet.yourdomain.com` so QR labels
+and e-mail links use your domain (takes effect immediately). The
+`workers.dev` address keeps working alongside.
+
+For e-mail from the same domain, onboard either the zone
+(`yourdomain.com` → sender `fleet@yourdomain.com`) or the subdomain itself
+(`fleet.yourdomain.com` → sender `noreply@fleet.yourdomain.com`) in
+**Compute → Email Service → Email Sending**; Email Sending treats a
+subdomain as its own sending domain. Then enter the sender under
+**Settings → E-mail** and send a test e-mail.
 
 ### 9. Updating
 

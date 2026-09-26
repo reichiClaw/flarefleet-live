@@ -11,6 +11,10 @@
 //   3. existing resources with the configured names (wrangler d1 list / kv namespace list)
 //   4. creating new resources (a KV title collision falls back to the existing namespace)
 //
+// Optionally, the build variable CUSTOM_DOMAIN (e.g. fleet.example.com) attaches the
+// Worker to that hostname as a Custom Domain (the zone must be on Cloudflare) and
+// fills PUBLIC_BASE_URL when it is still empty.
+//
 // Running it when the ids are already valid is a no-op. Used by `npm run deploy`
 // and by the installer, so that force-updating a fork from upstream (which resets
 // wrangler.jsonc to placeholders) never breaks the next deploy.
@@ -70,9 +74,26 @@ export function readBindings(text) {
   };
 }
 
-function writeBindings(text, { workerName, d1Id, kvId, r2Bucket }) {
+const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+
+export function readCustomDomain(text) {
+  return getStr(text, /"routes"\s*:\s*\[[\s\S]*?"pattern"\s*:\s*"([^"]*)"[\s\S]*?"custom_domain"\s*:\s*true/);
+}
+
+/** Adds or replaces the Custom Domain route and fills an empty PUBLIC_BASE_URL. */
+export function writeCustomDomain(text, domain) {
+  const route = `"routes": [{ "pattern": "${domain}", "custom_domain": true }]`;
+  let out = /^\s*"routes"\s*:/m.test(text)
+    ? text.replace(/^(\s*)"routes"\s*:\s*\[[^\]]*\]/m, `$1${route}`)
+    : text.replace(/^(\s*)("name"\s*:\s*"[^"]*",?)/m, (m, indent, nameLine) => `${indent}${nameLine.endsWith(",") ? nameLine : `${nameLine},`}\n${indent}${route},`);
+  out = out.replace(/("PUBLIC_BASE_URL"\s*:\s*)""/, `$1"https://${domain}"`);
+  return out;
+}
+
+function writeBindings(text, { workerName, d1Id, kvId, r2Bucket, customDomain }) {
   let out = text;
   if (workerName) out = out.replace(/^(\s*"name"\s*:\s*)"[^"]*"/m, `$1"${workerName}"`);
+  if (customDomain && readCustomDomain(out) !== customDomain) out = writeCustomDomain(out, customDomain);
   if (d1Id) out = out.replace(/("database_id"\s*:\s*)"[^"]*"/, `$1"${d1Id}"`);
   if (kvId) out = out.replace(/("kv_namespaces"[\s\S]*?"binding"\s*:\s*"KV"[\s\S]*?"id"\s*:\s*)"[^"]*"/, `$1"${kvId}"`);
   if (r2Bucket) out = out.replace(/("r2_buckets"[\s\S]*?"bucket_name"\s*:\s*)"[^"]*"/, `$1"${r2Bucket}"`);
@@ -161,9 +182,23 @@ export async function resolveBindings({ log = () => {}, createMissing = true } =
   const envBucket = process.env.R2_BUCKET_NAME;
   const bucketOverride = envBucket && envBucket !== cfg.r2Bucket ? envBucket : null;
 
+  const envDomain = (process.env.CUSTOM_DOMAIN ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (envDomain) {
+    if (!HOSTNAME_RE.test(envDomain)) throw new Error(`CUSTOM_DOMAIN "${process.env.CUSTOM_DOMAIN}" is not a valid hostname (expected e.g. fleet.example.com)`);
+    if (readCustomDomain(original) !== envDomain) {
+      result.customDomain = envDomain;
+      result.sources.domain = `env CUSTOM_DOMAIN (${envDomain})`;
+    }
+  }
+
   if (!needD1 && !needKv && !bucketOverride) {
     // Ids present; still make sure the bucket exists (cheap, idempotent) when asked to create.
     if (createMissing) ensureBucket(cfg.r2Bucket, log, result);
+    if (result.customDomain) {
+      writeFileSync(CONFIG, writeBindings(original, result));
+      result.changed = true;
+      log(`DOMAIN: ${result.sources.domain}`);
+    }
     return result;
   }
 
