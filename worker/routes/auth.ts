@@ -9,7 +9,7 @@ import { hashPassword, needsRehash, pbkdf2Iterations, randomToken, verifyPasswor
 import { clearSessionCookie, createSession, destroySession, rateLimit, requireAuth, setSessionCookie } from "../lib/auth";
 import { now, one, stmt, uid } from "../lib/db";
 import { audit } from "../lib/audit";
-import { isUsableBaseUrl, loadSettings, publicSettings } from "../lib/settings";
+import { baseUrlFor, clearSettingsCache, loadSettings, publicSettings } from "../lib/settings";
 import { emailAvailable, sendEmail } from "../lib/email";
 import { t } from "../lib/i18n";
 
@@ -71,12 +71,11 @@ auth.post("/setup", async (c) => {
       : []),
     stmt(c.env.DB, "INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES ('default_language', ?, ?, ?)", JSON.stringify(input.language), id, ts),
     // Remember the URL the app was reached at so QR labels and e-mail links work
-    // without editing PUBLIC_BASE_URL (Deploy-to-Cloudflare button flow).
-    ...(isUsableBaseUrl(c.env.PUBLIC_BASE_URL)
-      ? []
-      : [stmt(c.env.DB, "INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES ('public_base_url', ?, ?, ?)", JSON.stringify(new URL(c.req.url).origin), id, ts)]),
+    // without editing PUBLIC_BASE_URL (Deploy-to-Cloudflare button flow). It is
+    // the weakest source, so a configured URL or custom domain still wins.
+    stmt(c.env.DB, "INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES ('public_base_url_detected', ?, ?, ?)", JSON.stringify(new URL(c.req.url).origin), id, ts),
   ]);
-  await c.env.KV.delete("settings:v1");
+  await clearSettingsCache(c.env);
   await audit(c.env.DB, { actor_id: id, actor_label: input.name, action: "system.setup", entity_type: "user", entity_id: id, ip: c.get("ip") });
   const session = await createSession(c.env, id, c.get("ip"));
   setSessionCookie(c, session.id);
@@ -164,7 +163,7 @@ auth.post("/forgot-password", async (c) => {
   if (u && emailAvailable(c.env, settings)) {
     const token = randomToken(24);
     await c.env.KV.put(`pwreset:${token}`, u.id, { expirationTtl: 3600 });
-    const link = `${settings.public_base_url || c.env.PUBLIC_BASE_URL}/reset-password?token=${token}`;
+    const link = `${baseUrlFor(settings, c.req.url)}/reset-password?token=${token}`;
     await sendEmail(c.env, u.email, t(u.language, "email.reset.subject", { org: settings.org_name }), t(u.language, "email.reset.body", { name: u.name, link }));
     await audit(c.env.DB, { actor_id: u.id, actor_label: u.email, action: "auth.reset_requested", entity_type: "user", entity_id: u.id, ip });
   }

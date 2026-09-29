@@ -11,9 +11,11 @@
 //   3. existing resources with the configured names (wrangler d1 list / kv namespace list)
 //   4. creating new resources (a KV title collision falls back to the existing namespace)
 //
-// Optionally, the build variable CUSTOM_DOMAIN (e.g. fleet.example.com) attaches the
-// Worker to that hostname as a Custom Domain (the zone must be on Cloudflare) and
-// fills PUBLIC_BASE_URL when it is still empty.
+// The build variable CUSTOM_DOMAIN (e.g. fleet.example.com) replaces the Custom Domain
+// committed in wrangler.jsonc (the zone must be on the deploying Cloudflare account) and
+// moves PUBLIC_BASE_URL with it; CUSTOM_DOMAIN=none removes the route and serves the
+// Worker on its workers.dev address only. The build variables PUBLIC_BASE_URL and
+// EMAIL_FROM overwrite those vars, so a deployment can be re-pointed without a commit.
 //
 // Running it when the ids are already valid is a no-op. Used by `npm run deploy`
 // and by the installer, so that force-updating a fork from upstream (which resets
@@ -76,24 +78,54 @@ export function readBindings(text) {
 
 const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
+/** CUSTOM_DOMAIN values that mean "no custom domain, workers.dev only". */
+const DOMAIN_OFF = new Set(["none", "off", "no", "false", "-", "workers.dev"]);
+
 export function readCustomDomain(text) {
   return getStr(text, /"routes"\s*:\s*\[[\s\S]*?"pattern"\s*:\s*"([^"]*)"[\s\S]*?"custom_domain"\s*:\s*true/);
 }
 
-/** Adds or replaces the Custom Domain route and fills an empty PUBLIC_BASE_URL. */
-export function writeCustomDomain(text, domain) {
-  const route = `"routes": [{ "pattern": "${domain}", "custom_domain": true }]`;
-  let out = /^\s*"routes"\s*:/m.test(text)
-    ? text.replace(/^(\s*)"routes"\s*:\s*\[[^\]]*\]/m, `$1${route}`)
-    : text.replace(/^(\s*)("name"\s*:\s*"[^"]*",?)/m, (m, indent, nameLine) => `${indent}${nameLine.endsWith(",") ? nameLine : `${nameLine},`}\n${indent}${route},`);
-  out = out.replace(/("PUBLIC_BASE_URL"\s*:\s*)""/, `$1"https://${domain}"`);
-  return out;
+export function readVar(text, name) {
+  return getStr(text, new RegExp(`"${name}"\\s*:\\s*"([^"]*)"`));
 }
 
-function writeBindings(text, { workerName, d1Id, kvId, r2Bucket, customDomain }) {
+export function writeVar(text, name, value) {
+  const re = new RegExp(`("${name}"\\s*:\\s*)"[^"]*"`);
+  if (!re.test(text)) throw new Error(`Could not find "${name}" in wrangler.jsonc`);
+  return text.replace(re, `$1${JSON.stringify(value)}`);
+}
+
+/** PUBLIC_BASE_URL follows the Custom Domain unless it was pointed elsewhere on purpose. */
+function followDomain(text, previousDomain, url) {
+  const current = readVar(text, "PUBLIC_BASE_URL");
+  if (current && current !== `https://${previousDomain}`) return text;
+  return writeVar(text, "PUBLIC_BASE_URL", url);
+}
+
+/** Adds or replaces the Custom Domain route and moves PUBLIC_BASE_URL to it. */
+export function writeCustomDomain(text, domain) {
+  const previous = readCustomDomain(text);
+  const route = `"routes": [{ "pattern": "${domain}", "custom_domain": true }]`;
+  const out = /^\s*"routes"\s*:/m.test(text)
+    ? text.replace(/^(\s*)"routes"\s*:\s*\[[^\]]*\]/m, `$1${route}`)
+    : text.replace(/^(\s*)("name"\s*:\s*"[^"]*",?)/m, (m, indent, nameLine) => `${indent}${nameLine.endsWith(",") ? nameLine : `${nameLine},`}\n${indent}${route},`);
+  return followDomain(out, previous, `https://${domain}`);
+}
+
+/** Drops the Custom Domain route so the Worker is served on workers.dev only. */
+export function removeCustomDomain(text) {
+  const previous = readCustomDomain(text);
+  if (!previous) return text;
+  const out = text.replace(/^[^\S\n]*"routes"\s*:\s*\[[^\]]*\],?[^\S\n]*\n/m, "");
+  return followDomain(out, previous, "");
+}
+
+function writeBindings(text, { workerName, d1Id, kvId, r2Bucket, customDomain, dropDomain, vars }) {
   let out = text;
   if (workerName) out = out.replace(/^(\s*"name"\s*:\s*)"[^"]*"/m, `$1"${workerName}"`);
-  if (customDomain && readCustomDomain(out) !== customDomain) out = writeCustomDomain(out, customDomain);
+  if (dropDomain) out = removeCustomDomain(out);
+  else if (customDomain && readCustomDomain(out) !== customDomain) out = writeCustomDomain(out, customDomain);
+  for (const [name, value] of Object.entries(vars ?? {})) out = writeVar(out, name, value);
   if (d1Id) out = out.replace(/("database_id"\s*:\s*)"[^"]*"/, `$1"${d1Id}"`);
   if (kvId) out = out.replace(/("kv_namespaces"[\s\S]*?"binding"\s*:\s*"KV"[\s\S]*?"id"\s*:\s*)"[^"]*"/, `$1"${kvId}"`);
   if (r2Bucket) out = out.replace(/("r2_buckets"[\s\S]*?"bucket_name"\s*:\s*)"[^"]*"/, `$1"${r2Bucket}"`);
@@ -183,7 +215,12 @@ export async function resolveBindings({ log = () => {}, createMissing = true } =
   const bucketOverride = envBucket && envBucket !== cfg.r2Bucket ? envBucket : null;
 
   const envDomain = (process.env.CUSTOM_DOMAIN ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  if (envDomain) {
+  if (envDomain && DOMAIN_OFF.has(envDomain)) {
+    if (readCustomDomain(original)) {
+      result.dropDomain = true;
+      result.sources.domain = `env CUSTOM_DOMAIN=${envDomain} (workers.dev only)`;
+    }
+  } else if (envDomain) {
     if (!HOSTNAME_RE.test(envDomain)) throw new Error(`CUSTOM_DOMAIN "${process.env.CUSTOM_DOMAIN}" is not a valid hostname (expected e.g. fleet.example.com)`);
     if (readCustomDomain(original) !== envDomain) {
       result.customDomain = envDomain;
@@ -191,13 +228,30 @@ export async function resolveBindings({ log = () => {}, createMissing = true } =
     }
   }
 
+  // Let a deployment re-point itself without a commit.
+  const varOverrides = {};
+  for (const name of ["PUBLIC_BASE_URL", "EMAIL_FROM"]) {
+    const raw = process.env[name];
+    if (raw === undefined) continue;
+    let value = raw.trim();
+    if (name === "PUBLIC_BASE_URL" && value) {
+      value = value.replace(/\/+$/, "");
+      if (!/^https?:\/\//.test(value)) value = `https://${value}`;
+    }
+    if (value !== readVar(original, name)) {
+      varOverrides[name] = value;
+      result.sources[name.toLowerCase()] = `env ${name} (${value || "empty"})`;
+    }
+  }
+  if (Object.keys(varOverrides).length) result.vars = varOverrides;
+
   if (!needD1 && !needKv && !bucketOverride) {
     // Ids present; still make sure the bucket exists (cheap, idempotent) when asked to create.
     if (createMissing) ensureBucket(cfg.r2Bucket, log, result);
-    if (result.customDomain) {
+    if (result.customDomain || result.dropDomain || result.vars) {
       writeFileSync(CONFIG, writeBindings(original, result));
       result.changed = true;
-      log(`DOMAIN: ${result.sources.domain}`);
+      for (const [k, v] of Object.entries(result.sources)) log(`${k.toUpperCase()}: ${v}`);
     }
     return result;
   }

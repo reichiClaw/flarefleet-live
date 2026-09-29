@@ -2,6 +2,9 @@
 # FlareFleet needs no secrets: the first super admin is created through the
 # in-app setup screen (/setup) on first start.
 #
+# wrangler.jsonc carries the values of the deployed app, so a local run would put
+# the production host into QR codes and try to send real e-mail. These two lines
+# keep development to itself:
+#
 # PUBLIC_BASE_URL=http://localhost:5173
-# EMAIL_FROM=fleet@example.com
 # EMAIL_ENABLED=false

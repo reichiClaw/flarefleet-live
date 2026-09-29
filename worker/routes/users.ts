@@ -8,7 +8,7 @@ import { generatePassword, hashPassword, pbkdf2Iterations, randomToken } from ".
 import { requireAuth } from "../lib/auth";
 import { all, now, one, stmt, uid } from "../lib/db";
 import { audit } from "../lib/audit";
-import { loadSettings } from "../lib/settings";
+import { baseUrlFor, loadSettings } from "../lib/settings";
 import { emailAvailable, sendEmail } from "../lib/email";
 import { t } from "../lib/i18n";
 
@@ -50,7 +50,7 @@ users.post("/", async (c) => {
   if (canEmail) {
     const token = randomToken(24);
     await c.env.KV.put(`pwreset:${token}`, id, { expirationTtl: 48 * 3600 });
-    const link = `${settings.public_base_url || c.env.PUBLIC_BASE_URL}/reset-password?token=${token}&invite=1`;
+    const link = `${baseUrlFor(settings, c.req.url)}/reset-password?token=${token}&invite=1`;
     invited = await sendEmail(
       c.env,
       input.email,
@@ -112,7 +112,7 @@ users.post("/:id/reset-password", async (c) => {
   if (canEmail) {
     const token = randomToken(24);
     await c.env.KV.put(`pwreset:${token}`, id, { expirationTtl: 48 * 3600 });
-    const link = `${settings.public_base_url || c.env.PUBLIC_BASE_URL}/reset-password?token=${token}`;
+    const link = `${baseUrlFor(settings, c.req.url)}/reset-password?token=${token}`;
     emailed = await sendEmail(c.env, target.email, t(target.language, "email.reset.subject", { org: settings.org_name }), t(target.language, "email.reset.body", { name: target.name, link }));
   }
   if (!emailed) {

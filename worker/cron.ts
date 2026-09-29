@@ -43,7 +43,7 @@ export async function daily(env: Env): Promise<void> {
   const lines = overdue.map(
     (o) => `- ${o.internal_number} ${o.manufacturer} ${o.model}${o.license_plate ? ` (${o.license_plate})` : ""} · ${o.borrower_name} · ${new Date(o.expected_return_at).toLocaleDateString(lang === "de" ? "de-DE" : "en-GB")}`,
   );
-  const base = settings.public_base_url || env.PUBLIC_BASE_URL;
+  const base = settings.public_base_url;
   await sendEmail(
     env,
     recipients,

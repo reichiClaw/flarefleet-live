@@ -22,7 +22,19 @@ export const DEFAULT_SETTINGS: Settings = {
   pdf_footer: "",
 };
 
-const CACHE_KEY = "settings:v1";
+/** Settings as they sit in D1, including keys the app resolves instead of exposing. */
+export interface StoredSettings extends Settings {
+  /** URL the app was reached at during first-run setup. Weakest source for public_base_url. */
+  public_base_url_detected: string;
+}
+
+const DEFAULT_STORED: StoredSettings = { ...DEFAULT_SETTINGS, public_base_url_detected: "" };
+
+const CACHE_KEY = "settings:v2";
+
+export async function clearSettingsCache(env: Env): Promise<void> {
+  await env.KV.delete(CACHE_KEY);
+}
 
 /** True when PUBLIC_BASE_URL is an explicit public address (not empty, not a local dev URL). */
 export function isUsableBaseUrl(url: string | undefined): boolean {
@@ -30,11 +42,33 @@ export function isUsableBaseUrl(url: string | undefined): boolean {
   return !/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?\/?$/i.test(url.trim());
 }
 
-export async function loadSettings(env: Env): Promise<Settings> {
-  const cached = await env.KV.get<Settings>(CACHE_KEY, "json");
-  if (cached) return { ...DEFAULT_SETTINGS, ...cached };
+export type BaseUrlSource = "setting" | "config" | "detected" | "none";
+
+function clean(url: unknown): string {
+  return typeof url === "string" ? url.trim().replace(/\/+$/, "") : "";
+}
+
+/**
+ * The app setting wins over PUBLIC_BASE_URL from the deploy configuration, which
+ * wins over the URL seen at first-run setup. Without that order a deployment that
+ * recorded its workers.dev address could never be moved to a custom domain by
+ * changing the configuration.
+ */
+export function resolveBaseUrl(env: Env, stored: Pick<StoredSettings, "public_base_url" | "public_base_url_detected">): { url: string; source: BaseUrlSource } {
+  const setting = clean(stored.public_base_url);
+  if (setting) return { url: setting, source: "setting" };
+  if (isUsableBaseUrl(env.PUBLIC_BASE_URL)) return { url: clean(env.PUBLIC_BASE_URL), source: "config" };
+  const detected = clean(stored.public_base_url_detected);
+  if (detected) return { url: detected, source: "detected" };
+  return { url: "", source: "none" };
+}
+
+/** Raw stored values, i.e. what the super admin edits in Settings. */
+export async function loadStoredSettings(env: Env): Promise<StoredSettings> {
+  const cached = await env.KV.get<StoredSettings>(CACHE_KEY, "json");
+  if (cached) return { ...DEFAULT_STORED, ...cached };
   const rows = await all<{ key: string; value: string }>(env.DB, "SELECT key, value FROM settings");
-  const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS };
+  const merged: Record<string, unknown> = { ...DEFAULT_STORED };
   for (const r of rows) {
     try {
       merged[r.key] = JSON.parse(r.value);
@@ -42,10 +76,24 @@ export async function loadSettings(env: Env): Promise<Settings> {
       merged[r.key] = r.value;
     }
   }
-  if (!merged.public_base_url) merged.public_base_url = env.PUBLIC_BASE_URL;
-  const s = merged as unknown as Settings;
+  const s = merged as unknown as StoredSettings;
   await env.KV.put(CACHE_KEY, JSON.stringify(s), { expirationTtl: 300 });
   return s;
+}
+
+/** Values the app works with. Resolved after the cache read, so a deploy takes effect at once. */
+export function resolveSettings(env: Env, stored: StoredSettings): Settings {
+  const { public_base_url_detected: _detected, ...s } = stored;
+  return { ...s, public_base_url: resolveBaseUrl(env, stored).url };
+}
+
+export async function loadSettings(env: Env): Promise<Settings> {
+  return resolveSettings(env, await loadStoredSettings(env));
+}
+
+/** Address for links in e-mails and QR labels; a request can always speak for itself. */
+export function baseUrlFor(settings: Pick<Settings, "public_base_url">, requestUrl: string): string {
+  return settings.public_base_url || new URL(requestUrl).origin;
 }
 
 export async function saveSettings(env: Env, patch: Partial<Settings>, actorId: string): Promise<Settings> {
@@ -61,7 +109,7 @@ export async function saveSettings(env: Env, patch: Partial<Settings>, actorId: 
     ),
   );
   if (statements.length) await env.DB.batch(statements);
-  await env.KV.delete(CACHE_KEY);
+  await clearSettingsCache(env);
   return loadSettings(env);
 }
 

@@ -12,7 +12,10 @@ interface Payload {
     email_available: boolean;
     email_from: string;
     email_from_env: string;
+    public_base_url: string;
+    public_base_url_source: "setting" | "config" | "detected" | "none";
     public_base_url_env: string;
+    public_base_url_detected: string;
     users: number;
     categories: number;
   };
@@ -86,8 +89,15 @@ export function SettingsPage() {
               <option value="en">English</option>
             </Select>
           </Field>
-          <Field label={t("settings.public_base_url")} hint={sys.public_base_url_env}>
-            <Input value={form.public_base_url} onChange={str("public_base_url")} placeholder="https://fleet.example.com" />
+          <Field
+            label={t("settings.public_base_url")}
+            hint={
+              sys.public_base_url
+                ? t("settings.public_base_url_hint", { url: sys.public_base_url, source: t(`settings.base_url_src_${sys.public_base_url_source}`) })
+                : t("settings.base_url_src_none")
+            }
+          >
+            <Input value={form.public_base_url} onChange={str("public_base_url")} placeholder={sys.public_base_url_env || "https://fleet.example.com"} />
           </Field>
           <Toggle checked={form.public_qr_page} onChange={bool("public_qr_page")} label={t("settings.public_qr_page")} />
           <Field label={t("settings.pdf_footer")}>

@@ -142,7 +142,10 @@ configured names, and only as a last resort creates new ones. To pin your
 resources explicitly, set those three variables under **Workers & Pages →
 your Worker → Settings → Build → Variables** (ids are shown under **Settings
 → Bindings**). The same place takes `CUSTOM_DOMAIN` (e.g.
-`fleet.example.com`) to attach your own hostname, see "Custom domain".
+`fleet.example.com`) to replace the hostname this repository is configured
+for, `CUSTOM_DOMAIN=none` to serve on `workers.dev` only, and
+`PUBLIC_BASE_URL` / `EMAIL_FROM` to override those vars — see
+"Custom domain".
 
 ### Option B: Installer script
 
@@ -228,8 +231,8 @@ and set the variables:
 ```jsonc
 "vars": {
   "APP_NAME": "FlareFleet",
-  "PUBLIC_BASE_URL": "",                  // empty = recorded automatically at first-run setup; set for a custom domain
-  "EMAIL_FROM": "",                       // optional default sender; normally set in the app (step 5)
+  "PUBLIC_BASE_URL": "https://fleet.yourdomain.com",  // your hostname; empty = the URL of the first-run setup screen
+  "EMAIL_FROM": "fleet@yourdomain.com",   // default sender; can also be set in the app (step 5)
   "EMAIL_ENABLED": "true"                 // "false" hard-disables e-mail regardless of app settings
 }
 ```
@@ -291,10 +294,11 @@ This applies pending migrations, runs `vite build` (SPA + Worker) and
 Object class and registers the two cron triggers. Wrangler prints the URL,
 typically `https://flarefleet.<your-subdomain>.workers.dev`.
 
-The URL used in QR labels and e-mail links is recorded automatically when you
-complete the setup screen (step 7) and can be changed any time under
-**Settings → Public URL**; `PUBLIC_BASE_URL` in `wrangler.jsonc` only needs a
-value if you want to pin it.
+The URL used in QR labels and e-mail links is resolved in this order:
+**Settings → Public URL** (if filled), then `PUBLIC_BASE_URL` from
+`wrangler.jsonc`, then the URL the setup screen (step 7) was completed at.
+The Settings page names the value in use and where it comes from, so a change
+that does not show up there has been overridden by one of the earlier sources.
 
 ### 7. First start: create the super admin
 
@@ -318,29 +322,34 @@ Then, as Super Admin:
    upload, review, commit. The vehicles appear as *announced* and can be
    checked in when they arrive.
 
-### 8. Custom domain (optional)
+### 8. Custom domain
 
-Prerequisite: the zone (e.g. `yourdomain.com`) is on Cloudflare DNS. Pick
-one of:
+`wrangler.jsonc` carries the hostname of this deployment:
+
+```jsonc
+"routes": [{ "pattern": "fuhrpark.woodnet.cc", "custom_domain": true }],
+```
+
+`wrangler deploy` creates the DNS record and certificate for it; the zone must
+be on the deploying Cloudflare account. The `workers.dev` address keeps working
+alongside. To deploy a copy somewhere else, pick one of:
 
 - **Deploy button / Workers Builds:** **Workers & Pages → your Worker →
   Settings → Build → Variables** → add `CUSTOM_DOMAIN` =
-  `fleet.yourdomain.com`, then **Deployments → Retry** (or push a commit).
-  The resolver writes the Custom Domain route into `wrangler.jsonc`, fills
-  an empty `PUBLIC_BASE_URL` with `https://fleet.yourdomain.com`, and
-  `wrangler deploy` creates the DNS record and certificate. This survives
-  force-updates of your copy.
+  `fleet.yourdomain.com` (or `none` for `workers.dev` only), then
+  **Deployments → Retry** (or push a commit). The resolver rewrites the route
+  and moves `PUBLIC_BASE_URL` with it. This survives force-updates of your
+  copy, which is why it beats editing `wrangler.jsonc` in a fork.
 - **Installer:** `npm run setup:cloudflare` asks for the public URL; a
   non-`workers.dev` hostname is attached as Custom Domain on confirmation.
-- **Manual:** add `"routes": [{ "pattern": "fleet.yourdomain.com",
-  "custom_domain": true }]` to `wrangler.jsonc` and run `npm run deploy`, or
-  use the dashboard (**Settings → Domains & Routes → Add → Custom domain**).
+- **Manual:** change the `pattern` and `PUBLIC_BASE_URL` in `wrangler.jsonc`
+  and run `npm run deploy`, or use the dashboard (**Settings → Domains &
+  Routes → Add → Custom domain**).
 
-Afterwards open the app under the new hostname and check **Settings →
-General → Public URL**: if the first-run setup recorded the `workers.dev`
-address there, replace it with `https://fleet.yourdomain.com` so QR labels
-and e-mail links use your domain (takes effect immediately). The
-`workers.dev` address keeps working alongside.
+Open the app under the hostname afterwards and check **Settings → General →
+Public URL**: the hint below the field names the address in use and its
+source. An address typed into that field wins over the configuration, so clear
+it if the deployment should follow `wrangler.jsonc`.
 
 For e-mail from the same domain, onboard either the zone
 (`yourdomain.com` → sender `fleet@yourdomain.com`) or the subdomain itself

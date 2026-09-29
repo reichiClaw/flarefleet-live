@@ -21,7 +21,7 @@ import { parseBody } from "../lib/validate";
 import { requireAuth, type AppContext } from "../lib/auth";
 import { forbidden } from "../lib/errors";
 import { all, json, now, stmt } from "../lib/db";
-import { loadSettings } from "../lib/settings";
+import { baseUrlFor, loadSettings } from "../lib/settings";
 import { qrSvg } from "../lib/qr";
 import { audit } from "../lib/audit";
 import { createVehicle, getVehicle, getVehicleRow, listLoansForVehicle, listVehicles, updateVehicle } from "../services/vehicles";
@@ -129,8 +129,7 @@ vehicles.get("/:id/timeline", async (c) => {
 vehicles.get("/:id/qr.svg", async (c) => {
   const v = await getVehicleRow(c.env, c.req.param("id"));
   const settings = await loadSettings(c.env);
-  const base = settings.public_base_url || c.env.PUBLIC_BASE_URL;
-  const svg = qrSvg(`${base}/q/${v.qr_code}`);
+  const svg = qrSvg(`${baseUrlFor(settings, c.req.url)}/q/${v.qr_code}`);
   return new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "private, max-age=3600" } });
 });
 
