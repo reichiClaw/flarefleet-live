@@ -56,8 +56,9 @@ export async function loadUser(env: Env, userId: string): Promise<SessionUser | 
     language: "de" | "en";
     must_change_password: number;
     is_active: number;
-  }>(env.DB, "SELECT id, email, name, role, language, must_change_password, is_active FROM users WHERE id = ?", userId);
-  if (!u || !u.is_active) return null;
+    deleted_at: string | null;
+  }>(env.DB, "SELECT id, email, name, role, language, must_change_password, is_active, deleted_at FROM users WHERE id = ?", userId);
+  if (!u || !u.is_active || u.deleted_at) return null;
   return {
     id: u.id,
     email: u.email,

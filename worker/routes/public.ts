@@ -13,9 +13,10 @@ const pub = new Hono<{ Bindings: Env; Variables: AppVariables }>();
  */
 pub.get("/qr/:code", async (c) => {
   const settings = await loadSettings(c.env);
-  const v = await getVehicleByQr(c.env, c.req.param("code"));
+  const signedIn = !!c.get("user");
+  const v = await getVehicleByQr(c.env, c.req.param("code"), signedIn);
   if (!v) throw notFound();
-  if (!settings.public_qr_page && !c.get("user")) throw new ApiError(403, "public_qr_disabled");
+  if (!settings.public_qr_page && !signedIn) throw new ApiError(403, "public_qr_disabled");
   return c.json({
     id: c.get("user") ? v.id : undefined,
     org_name: settings.org_name,

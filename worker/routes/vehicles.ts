@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuditEntry, Damage, Protocol } from "@shared/types";
+import { hasRole } from "@shared/types";
 import {
   ArchiveSchema,
   CheckInSchema,
@@ -18,13 +19,14 @@ import {
 import type { AppVariables, Env } from "../env";
 import { parseBody } from "../lib/validate";
 import { requireAuth, type AppContext } from "../lib/auth";
+import { forbidden } from "../lib/errors";
 import { all, json, now, stmt } from "../lib/db";
 import { loadSettings } from "../lib/settings";
 import { qrSvg } from "../lib/qr";
 import { audit } from "../lib/audit";
 import { createVehicle, getVehicle, getVehicleRow, listLoansForVehicle, listVehicles, updateVehicle } from "../services/vehicles";
 import * as wf from "../services/workflows";
-import { mediaForDamage, toMediaItem, type MediaRow } from "../services/media";
+import { toMediaItem, type MediaRow } from "../services/media";
 import { shapeProtocol, type ProtocolRowFull } from "./protocols";
 
 const vehicles = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -55,7 +57,11 @@ vehicles.patch("/:id", requireAuth("admin"), async (c) => {
   return c.json(await updateVehicle(c.env, c.get("user"), c.req.param("id"), input, c.get("ip")));
 });
 
-vehicles.get("/:id/loans", async (c) => c.json({ results: await listLoansForVehicle(c.env, c.req.param("id")) }));
+vehicles.get("/:id/loans", async (c) => {
+  const id = c.req.param("id");
+  await getVehicleRow(c.env, id);
+  return c.json({ results: await listLoansForVehicle(c.env, id) });
+});
 
 vehicles.get("/:id/protocols", async (c) => {
   const rows = await all<ProtocolRowFull>(
@@ -67,16 +73,30 @@ vehicles.get("/:id/protocols", async (c) => {
 });
 
 vehicles.get("/:id/damages", async (c) => {
+  const id = c.req.param("id");
   const rows = await all<Record<string, unknown>>(
     c.env.DB,
     "SELECT d.*, u.name AS reported_by_name FROM damages d LEFT JOIN users u ON u.id = d.reported_by WHERE d.vehicle_id = ? ORDER BY d.resolved_at IS NOT NULL, d.reported_at DESC",
-    c.req.param("id"),
+    id,
   );
-  const results: Damage[] = [];
-  for (const r of rows) {
-    const photos = await mediaForDamage(c.env, r.id as string);
-    results.push({ ...(r as unknown as Damage), photos: photos.map(toMediaItem) });
+  // One query for all damage photos: a vehicle with many damages would otherwise
+  // run past the per-invocation D1 query limit.
+  const photos = await all<MediaRow>(
+    c.env.DB,
+    "SELECT * FROM media WHERE vehicle_id = ? AND damage_id IS NOT NULL AND discarded_at IS NULL ORDER BY created_at",
+    id,
+  );
+  const byDamage = new Map<string, MediaRow[]>();
+  for (const m of photos) {
+    if (!m.damage_id) continue;
+    const list = byDamage.get(m.damage_id) ?? [];
+    list.push(m);
+    byDamage.set(m.damage_id, list);
   }
+  const results: Damage[] = rows.map((r) => ({
+    ...(r as unknown as Damage),
+    photos: (byDamage.get(r.id as string) ?? []).map(toMediaItem),
+  }));
   return c.json({ results });
 });
 
@@ -118,7 +138,13 @@ vehicles.get("/:id/qr.svg", async (c) => {
 vehicles.post("/:id/check-in", async (c) => c.json(await wf.checkIn(await ctx(c), c.req.param("id"), await parseBody(c, CheckInSchema)), 201));
 vehicles.post("/:id/loan", async (c) => c.json(await wf.loanCheckout(await ctx(c), c.req.param("id"), await parseBody(c, LoanCheckoutSchema)), 201));
 vehicles.post("/:id/return", async (c) => c.json(await wf.loanReturn(await ctx(c), c.req.param("id"), await parseBody(c, LoanReturnSchema)), 201));
-vehicles.post("/:id/check-out", async (c) => c.json(await wf.checkOut(await ctx(c), c.req.param("id"), await parseBody(c, CheckOutSchema)), 201));
+vehicles.post("/:id/check-out", async (c) => {
+  const input = await parseBody(c, CheckOutSchema);
+  // Archiving retires a vehicle from the fleet, so it stays an admin action even
+  // when it happens as part of a check-out.
+  if (input.archive && !hasRole(c.get("user").role, "admin")) throw forbidden();
+  return c.json(await wf.checkOut(await ctx(c), c.req.param("id"), input), 201);
+});
 vehicles.post("/:id/maintenance/start", async (c) => c.json(await wf.maintenanceStart(await ctx(c), c.req.param("id"), await parseBody(c, MaintenanceStartSchema)), 201));
 vehicles.post("/:id/maintenance/end", async (c) => c.json(await wf.maintenanceEnd(await ctx(c), c.req.param("id"), await parseBody(c, MaintenanceEndSchema)), 201));
 vehicles.post("/:id/damages", async (c) => c.json(await wf.reportDamage(await ctx(c), c.req.param("id"), await parseBody(c, DamageReportSchema)), 201));

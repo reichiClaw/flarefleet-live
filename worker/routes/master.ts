@@ -2,10 +2,12 @@ import { Hono } from "hono";
 import { CategorySchema, CompanySchema, DriverSchema } from "@shared/schemas";
 import type { AppVariables, Env } from "../env";
 import { parseBody } from "../lib/validate";
-import { conflict, notFound } from "../lib/errors";
+import { badRequest, conflict, notFound } from "../lib/errors";
 import { requireAuth } from "../lib/auth";
 import { all, now, one, stmt, uid } from "../lib/db";
 import { audit } from "../lib/audit";
+
+const COMPANY_TYPES = new Set(["supplier", "subcontractor", "internal"]);
 
 const master = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -23,7 +25,7 @@ master.get("/categories", requireAuth("user"), async (c) => {
 
 master.post("/categories", requireAuth("admin"), async (c) => {
   const input = await parseBody(c, CategorySchema);
-  if (await one(c.env.DB, "SELECT 1 AS x FROM categories WHERE name = ? COLLATE NOCASE", input.name)) throw conflict("duplicate_number");
+  if (await one(c.env.DB, "SELECT 1 AS x FROM categories WHERE name = ? COLLATE NOCASE", input.name)) throw conflict("duplicate_name");
   const id = uid();
   const ts = now();
   await stmt(c.env.DB, "INSERT INTO categories (id, name, meter_mode, is_active, created_at, updated_at) VALUES (?,?,?,?,?,?)", id, input.name, input.meter_mode, input.is_active ? 1 : 0, ts, ts).run();
@@ -37,7 +39,7 @@ master.patch("/categories/:id", requireAuth("admin"), async (c) => {
   const input = await parseBody(c, CategorySchema.partial());
   const existing = await one<Record<string, unknown>>(c.env.DB, "SELECT * FROM categories WHERE id = ?", id);
   if (!existing) throw notFound();
-  if (input.name && (await one(c.env.DB, "SELECT 1 AS x FROM categories WHERE name = ? COLLATE NOCASE AND id <> ?", input.name, id))) throw conflict("duplicate_number");
+  if (input.name && (await one(c.env.DB, "SELECT 1 AS x FROM categories WHERE name = ? COLLATE NOCASE AND id <> ?", input.name, id))) throw conflict("duplicate_name");
   await stmt(
     c.env.DB,
     "UPDATE categories SET name = COALESCE(?, name), meter_mode = COALESCE(?, meter_mode), is_active = COALESCE(?, is_active), updated_at = ? WHERE id = ?",
@@ -65,7 +67,8 @@ master.delete("/categories/:id", requireAuth("admin"), async (c) => {
 
 // ---- companies ------------------------------------------------------------
 master.get("/companies", requireAuth("user"), async (c) => {
-  const type = c.req.query("type");
+  const requestedType = c.req.query("type");
+  const type = requestedType && COMPANY_TYPES.has(requestedType) ? requestedType : undefined;
   const includeInactive = c.req.query("include_inactive") === "1";
   const where: string[] = [];
   const params: unknown[] = [];
@@ -144,8 +147,17 @@ master.get("/drivers", requireAuth("user"), async (c) => {
   return c.json({ results: rows.map(shapeCompany) });
 });
 
+/** Fails with a readable 400 instead of an opaque FOREIGN KEY error from D1. */
+async function assertCompany(c: { env: Env }, companyId: string | null | undefined) {
+  if (!companyId) return;
+  if (!(await one(c.env.DB, "SELECT 1 AS x FROM companies WHERE id = ?", companyId))) {
+    throw badRequest("invalid_reference", { company_id: "not_found" });
+  }
+}
+
 master.post("/drivers", requireAuth("user"), async (c) => {
   const input = await parseBody(c, DriverSchema);
+  await assertCompany(c, input.company_id);
   const id = uid();
   const ts = now();
   await stmt(c.env.DB, "INSERT INTO drivers (id, company_id, name, phone, email, is_active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", id, input.company_id ?? null, input.name, input.phone, input.email, input.is_active ? 1 : 0, ts, ts).run();
@@ -160,6 +172,7 @@ master.patch("/drivers/:id", requireAuth("admin"), async (c) => {
   const input = await parseBody(c, DriverSchema.partial());
   const existing = await one(c.env.DB, "SELECT id FROM drivers WHERE id = ?", id);
   if (!existing) throw notFound();
+  if (input.company_id !== undefined) await assertCompany(c, input.company_id);
   const sets: string[] = ["updated_at = ?"];
   const params: unknown[] = [now()];
   for (const [k, v] of Object.entries(input)) {

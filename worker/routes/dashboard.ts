@@ -3,7 +3,10 @@ import type { AuditEntry, DashboardSummary, Loan, VehicleStatus } from "@shared/
 import type { AppVariables, Env } from "../env";
 import { requireAuth } from "../lib/auth";
 import { all, json, now, paginate, parsePage } from "../lib/db";
+import { hasRole } from "@shared/types";
 import { VEHICLE_SELECT, toLoan, toSummary, type LoanRow, type VehicleRow } from "../services/vehicles";
+
+const LOAN_STATUSES = new Set(["active", "returned", "cancelled", "all"]);
 
 const dashboard = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 dashboard.use("*", requireAuth("user"));
@@ -41,6 +44,9 @@ dashboard.get("/summary", async (c) => {
   const soon = new Date(Date.now() + 2 * 86400_000).toISOString();
   const weekAhead = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
 
+  // The activity feed mirrors the audit log, which is admin-only; regular users
+  // would otherwise read settings and user changes here.
+  const showRecent = hasRole(c.get("user").role, "admin");
   const countRows = await all<{ status: VehicleStatus; c: number }>(db, "SELECT status, COUNT(*) AS c FROM vehicles GROUP BY status");
   const counts = { announced: 0, available: 0, loaned: 0, damaged: 0, maintenance: 0, checked_out: 0, archived: 0 } as Record<VehicleStatus, number>;
   for (const r of countRows) counts[r.status] = r.c;
@@ -51,7 +57,12 @@ dashboard.get("/summary", async (c) => {
     all<VehicleRow>(db, `${VEHICLE_SELECT} WHERE v.status = 'announced' ORDER BY v.expected_arrival IS NULL, v.expected_arrival, v.created_at LIMIT 20`),
     all<VehicleRow>(db, `${VEHICLE_SELECT} WHERE v.status IN ('damaged','maintenance') ORDER BY v.updated_at DESC LIMIT 20`),
     all<VehicleRow>(db, `${VEHICLE_SELECT} WHERE v.return_due IS NOT NULL AND v.return_due <= ? AND v.status NOT IN ('checked_out','archived') ORDER BY v.return_due LIMIT 20`, weekAhead),
-    all<Record<string, unknown>>(db, "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 15"),
+    showRecent
+      ? all<Record<string, unknown>>(
+          db,
+          "SELECT id, actor_id, actor_label, action, entity_type, entity_id, vehicle_id, details, created_at FROM audit_log ORDER BY created_at DESC LIMIT 15",
+        )
+      : Promise.resolve([]),
     db.prepare("SELECT COUNT(*) AS c FROM damages WHERE resolved_at IS NULL").first<{ c: number }>(),
     db.prepare("SELECT COUNT(*) AS c FROM protocols WHERE pdf_status = 'failed'").first<{ c: number }>(),
   ]);
@@ -77,7 +88,8 @@ dashboard.get("/summary", async (c) => {
 dashboard.get("/loans", async (c) => {
   const url = new URL(c.req.url);
   const page = parsePage(url);
-  const status = url.searchParams.get("status") ?? "active";
+  const requested = url.searchParams.get("status") ?? "active";
+  const status = LOAN_STATUSES.has(requested) ? requested : "active";
   const where = status === "all" ? "" : " WHERE l.status = ?";
   const params = status === "all" ? [] : [status];
   const res = await paginate<LoanWithVehicleRow>(

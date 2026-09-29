@@ -34,12 +34,22 @@ export function stmt(db: D1Database, sql: string, ...params: unknown[]): D1Prepa
 
 /** Atomic sequence allocation (SQLite UPDATE ... RETURNING). */
 export async function nextSequence(db: D1Database, name: string): Promise<number> {
+  const [first] = await reserveSequence(db, name, 1);
+  return first;
+}
+
+/**
+ * Reserves `count` consecutive sequence values in one round trip. Bulk callers
+ * (import commit) would otherwise spend one query per row.
+ */
+export async function reserveSequence(db: D1Database, name: string, count: number): Promise<number[]> {
+  const n = Math.max(1, Math.floor(count));
   const r = await db
-    .prepare("UPDATE sequences SET next_value = next_value + 1 WHERE name = ? RETURNING next_value - 1 AS v")
-    .bind(name)
+    .prepare("UPDATE sequences SET next_value = next_value + ? WHERE name = ? RETURNING next_value - ? AS v")
+    .bind(n, name, n)
     .first<{ v: number }>();
   if (!r) throw new Error(`sequence ${name} missing`);
-  return r.v;
+  return Array.from({ length: n }, (_, i) => Number(r.v) + i);
 }
 
 export function parsePage(url: URL, defaultSize = 25): { page: number; size: number; offset: number } {

@@ -23,6 +23,12 @@ interface FormState {
   operating_hours: string;
 }
 
+// A half-typed or comma-separated number must not reach the API as NaN.
+function numberOrNull(raw: string): number | null {
+  const n = Number(raw.trim().replace(",", "."));
+  return raw.trim() === "" || !Number.isFinite(n) ? null : n;
+}
+
 const empty: FormState = {
   internal_number: "",
   external_key: "",
@@ -83,8 +89,8 @@ export function VehicleFormPage() {
         supplier_id: form.supplier_id || null,
         expected_arrival: form.expected_arrival || null,
         return_due: form.return_due || null,
-        odometer_km: form.odometer_km === "" ? null : Number(form.odometer_km),
-        operating_hours: form.operating_hours === "" ? null : Number(form.operating_hours),
+        odometer_km: numberOrNull(form.odometer_km),
+        operating_hours: numberOrNull(form.operating_hours),
       };
       if (editing) return api.patch<Vehicle>(`/api/vehicles/${id}`, payload);
       const { return_due: _rd, ...createPayload } = payload;

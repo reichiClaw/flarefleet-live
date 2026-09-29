@@ -13,7 +13,7 @@ settings.use("*", requireAuth("super_admin"));
 
 settings.get("/", async (c) => {
   const s = await loadSettings(c.env);
-  const users = await one<{ c: number }>(c.env.DB, "SELECT COUNT(*) AS c FROM users WHERE is_active = 1");
+  const users = await one<{ c: number }>(c.env.DB, "SELECT COUNT(*) AS c FROM users WHERE is_active = 1 AND deleted_at IS NULL");
   const categories = await one<{ c: number }>(c.env.DB, "SELECT COUNT(*) AS c FROM categories WHERE is_active = 1");
   return c.json({
     settings: s,

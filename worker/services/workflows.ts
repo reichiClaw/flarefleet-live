@@ -12,7 +12,7 @@ import type {
   MaintenanceStartInput,
 } from "@shared/schemas";
 import type { Env, SessionUser } from "../env";
-import { nextSequence, now, one, stmt, uid } from "../lib/db";
+import { all, nextSequence, now, one, stmt, uid } from "../lib/db";
 import { ApiError, badRequest, conflict, notFound } from "../lib/errors";
 import { auditStatement } from "../lib/audit";
 import { attachStatements, loadStaged, type MediaRow } from "./media";
@@ -80,10 +80,10 @@ async function loadEvidence(
   signatureRequired: boolean,
 ) {
   if (photoIds.length < minPhotos) throw badRequest("photos_required", { photo_ids: "min" }, { count: minPhotos });
-  const photos = await loadStaged(ctx.env, photoIds, "photo");
+  const photos = await loadStaged(ctx.env, photoIds, "photo", ctx.user.id);
   let signature: MediaRow | null = null;
   if (signatureId) {
-    [signature] = await loadStaged(ctx.env, [signatureId], "signature");
+    [signature] = await loadStaged(ctx.env, [signatureId], "signature", ctx.user.id);
   } else if (signatureRequired) {
     throw badRequest("signature_required", { signature_id: "required" });
   }
@@ -91,10 +91,16 @@ async function loadEvidence(
 }
 
 async function loadDamagePhotos(ctx: WorkflowCtx, damages: DamageLine[]): Promise<Map<number, MediaRow[]>> {
+  // One lookup for every damage: 20 damages would otherwise be 20 queries.
+  const rows = await loadStaged(
+    ctx.env,
+    damages.flatMap((d) => d.photo_ids),
+    "photo",
+    ctx.user.id,
+  );
+  const byId = new Map(rows.map((r) => [r.id, r]));
   const map = new Map<number, MediaRow[]>();
-  for (let i = 0; i < damages.length; i++) {
-    map.set(i, await loadStaged(ctx.env, damages[i].photo_ids, "photo"));
-  }
+  damages.forEach((d, i) => map.set(i, d.photo_ids.map((id) => byId.get(id)!)));
   return map;
 }
 
@@ -123,6 +129,8 @@ interface ProtocolSpec {
   extraStatements?: D1PreparedStatement[];
   // Statements that must exist before the protocol row (e.g. a loan the protocol references).
   preStatements?: D1PreparedStatement[];
+  // Statements that need the protocol id (e.g. linking the loan back to its protocol).
+  linkStatements?: (protocolId: string) => D1PreparedStatement[];
   auditAction: string;
   auditDetails?: Record<string, unknown>;
   sendCopyTo?: string[];
@@ -229,6 +237,7 @@ async function commitProtocol(ctx: WorkflowCtx, spec: ProtocolSpec): Promise<{ i
   });
 
   statements.push(...(spec.extraStatements ?? []));
+  statements.push(...(spec.linkStatements?.(id) ?? []));
   statements.push(
     auditStatement(env.DB, {
       actor_id: user.id,
@@ -274,7 +283,8 @@ export function checkIn(ctx: WorkflowCtx, vehicleId: string, input: CheckInInput
     const damagePhotos = await loadDamagePhotos(ctx, input.damages);
     const supplierId = input.supplier_id ?? v.supplier_id;
     const supplier = supplierId ? await one<{ name: string; company_type: string }>(ctx.env.DB, "SELECT name, company_type FROM companies WHERE id = ?", supplierId) : null;
-    if (supplierId && supplier && supplier.company_type !== "supplier") throw badRequest("company_type", { supplier_id: "type" });
+    if (supplierId && !supplier) throw badRequest("invalid_reference", { supplier_id: "not_found" });
+    if (supplier && supplier.company_type !== "supplier") throw badRequest("company_type", { supplier_id: "type" });
 
     const vehicleUpdates: Record<string, unknown> = {};
     if (input.location) vehicleUpdates.location = input.location;
@@ -318,12 +328,12 @@ export function loanCheckout(ctx: WorkflowCtx, vehicleId: string, input: LoanChe
     let company: { name: string; company_type: string } | null = null;
     if (input.company_id) {
       company = await one(ctx.env.DB, "SELECT name, company_type FROM companies WHERE id = ?", input.company_id);
-      if (!company) throw notFound();
+      if (!company) throw badRequest("invalid_reference", { company_id: "not_found" });
       if (company.company_type === "supplier") throw badRequest("company_type", { company_id: "type" });
     }
     if (input.driver_id) {
       const driver = await one<{ id: string }>(ctx.env.DB, "SELECT id FROM drivers WHERE id = ?", input.driver_id);
-      if (!driver) throw notFound();
+      if (!driver) throw badRequest("invalid_reference", { driver_id: "not_found" });
     }
 
     const loanId = uid();
@@ -365,12 +375,11 @@ export function loanCheckout(ctx: WorkflowCtx, vehicleId: string, input: LoanChe
       party: { name: input.borrower_name, phone: input.borrower_phone, email: input.borrower_email, company: company?.name ?? null },
       loanSnapshot: { checked_out_at: ts, expected_return_at: input.expected_return_at },
       preStatements: [loanStatement],
+      linkStatements: (protocolId) => [stmt(ctx.env.DB, "UPDATE loans SET checkout_protocol_id = ? WHERE id = ?", protocolId, loanId)],
       auditAction: "loan.checked_out",
       auditDetails: { loan_id: loanId, borrower: input.borrower_name, expected_return_at: input.expected_return_at },
       sendCopyTo: copyRecipients(input.borrower_email, input.send_copy_to),
     });
-    // link protocol to loan (loan row must exist first, hence a second statement)
-    await stmt(ctx.env.DB, "UPDATE loans SET checkout_protocol_id = ? WHERE id = ?", p.id, loanId).run();
     return result(ctx, vehicleId, p, loanId);
   });
 }
@@ -421,11 +430,11 @@ export function loanReturn(ctx: WorkflowCtx, vehicleId: string, input: LoanRetur
           loan.id,
         ),
       ],
+      linkStatements: (protocolId) => [stmt(ctx.env.DB, "UPDATE loans SET return_protocol_id = ? WHERE id = ?", protocolId, loan.id)],
       auditAction: "loan.returned",
       auditDetails: { loan_id: loan.id, condition: input.condition, damages: input.damages.length },
       sendCopyTo: copyRecipients(loan.borrower_email, input.send_copy_to),
     });
-    await stmt(ctx.env.DB, "UPDATE loans SET return_protocol_id = ? WHERE id = ?", p.id, loan.id).run();
     return result(ctx, vehicleId, p, loan.id);
   });
 }
@@ -440,9 +449,11 @@ export function checkOut(ctx: WorkflowCtx, vehicleId: string, input: CheckOutInp
     if (await getActiveLoan(ctx.env, vehicleId)) throw conflict("active_loan");
     const readings = validateReadings(v, input, true);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, ctx.settings.min_photos_check_out, ctx.settings.signature_required_check_out);
+    if (input.condition === "damaged" && input.damages.length === 0) throw badRequest("damage_description_required", { damages: "required" });
     const damagePhotos = await loadDamagePhotos(ctx, input.damages);
     const companyId = input.company_id ?? v.supplier_id;
     const company = companyId ? await one<{ name: string; company_type: string }>(ctx.env.DB, "SELECT name, company_type FROM companies WHERE id = ?", companyId) : null;
+    if (companyId && !company) throw badRequest("invalid_reference", { company_id: "not_found" });
     const ts = now();
     const statusAfter: VehicleStatus = input.archive ? "archived" : "checked_out";
     const vehicleUpdates: Record<string, unknown> = { return_due: null };
@@ -509,7 +520,14 @@ export function maintenanceEnd(ctx: WorkflowCtx, vehicleId: string, input: Maint
     const readings = validateReadings(v, input, false);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, 0, false);
     const ts = now();
-    const resolveStatements = input.resolved_damage_ids.map((d) =>
+    // Only count damages that are really open for this vehicle, otherwise an unknown or
+    // already resolved id would make the vehicle look repaired while damages remain.
+    const open = await all<{ id: string }>(ctx.env.DB, "SELECT id FROM damages WHERE vehicle_id = ? AND resolved_at IS NULL", v.id);
+    const openIds = new Set(open.map((d) => d.id));
+    const unknown = input.resolved_damage_ids.filter((d) => !openIds.has(d));
+    if (unknown.length) throw badRequest("damage_not_open", { resolved_damage_ids: "unknown" });
+    const resolvedIds = [...new Set(input.resolved_damage_ids)];
+    const resolveStatements = resolvedIds.map((d) =>
       stmt(
         ctx.env.DB,
         "UPDATE damages SET resolved_at = ?, resolved_by = ?, resolution_notes = ? WHERE id = ? AND vehicle_id = ? AND resolved_at IS NULL",
@@ -520,7 +538,7 @@ export function maintenanceEnd(ctx: WorkflowCtx, vehicleId: string, input: Maint
         v.id,
       ),
     );
-    const remaining = Number(v.open_damage_count) - input.resolved_damage_ids.length;
+    const remaining = openIds.size - resolvedIds.length;
     const p = await commitProtocol(ctx, {
       vehicle: v,
       type: "maintenance_end",
@@ -532,10 +550,10 @@ export function maintenanceEnd(ctx: WorkflowCtx, vehicleId: string, input: Maint
       signature,
       damages: [],
       damagePhotos: new Map(),
-      extra: { resolved_damage_ids: input.resolved_damage_ids },
+      extra: { resolved_damage_ids: resolvedIds },
       extraStatements: resolveStatements,
       auditAction: "maintenance.ended",
-      auditDetails: { resolved: input.resolved_damage_ids.length },
+      auditDetails: { resolved: resolvedIds.length },
     });
     return result(ctx, vehicleId, p);
   });
@@ -548,7 +566,7 @@ export function reportDamage(ctx: WorkflowCtx, vehicleId: string, input: DamageR
   return withVehicleLock(ctx.env, vehicleId, async () => {
     const v = await getVehicleRow(ctx.env, vehicleId);
     assertStatus(v, ["available", "loaned", "damaged", "maintenance"]);
-    const photos = await loadStaged(ctx.env, input.photo_ids, "photo");
+    const photos = await loadStaged(ctx.env, input.photo_ids, "photo", ctx.user.id);
     const loan = await getActiveLoan(ctx.env, vehicleId);
     const id = uid();
     const ts = now();
@@ -597,7 +615,7 @@ export function resolveDamage(ctx: WorkflowCtx, vehicleId: string, damageId: str
     );
     if (!damage) throw notFound();
     if (damage.resolved_at) throw conflict("vehicle_status", { status: v.status });
-    const photos = await loadStaged(ctx.env, input.photo_ids, "photo");
+    const photos = await loadStaged(ctx.env, input.photo_ids, "photo", ctx.user.id);
     const ts = now();
     const remaining = Number(v.open_damage_count) - 1;
     const statusAfter: VehicleStatus = v.status === "damaged" && remaining <= 0 ? "available" : v.status;

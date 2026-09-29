@@ -22,6 +22,11 @@ export function QrScanner({ onResult, active = true }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
   const doneRef = useRef(false);
+  // Kept in refs so that a new callback or language does not tear down the camera.
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
+  const noCameraRef = useRef(t("scan.no_camera"));
+  noCameraRef.current = t("scan.no_camera");
 
   useEffect(() => {
     if (!active) return;
@@ -30,23 +35,41 @@ export function QrScanner({ onResult, active = true }: Props) {
     let cancelled = false;
     doneRef.current = false;
 
+    const stop = () => {
+      stream?.getTracks().forEach((tr) => tr.stop());
+      stream = null;
+    };
+
     async function start() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false });
-        if (cancelled) return;
-        const video = videoRef.current!;
+        // The effect may have been cleaned up while the permission prompt was open;
+        // without this the camera would stay on until the tab is closed.
+        if (cancelled) {
+          stop();
+          return;
+        }
+        const video = videoRef.current;
+        if (!video) {
+          stop();
+          return;
+        }
         video.srcObject = stream;
-        await video.play();
+        await video.play().catch(() => undefined);
+        if (cancelled) {
+          stop();
+          return;
+        }
         tick();
       } catch {
-        setError(t("scan.no_camera"));
+        if (!cancelled) setError(noCameraRef.current);
       }
     }
 
     function tick() {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || doneRef.current) return;
+      if (cancelled || !video || !canvas || doneRef.current) return;
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         const size = Math.min(video.videoWidth, video.videoHeight);
         canvas.width = 480;
@@ -58,7 +81,7 @@ export function QrScanner({ onResult, active = true }: Props) {
         if (code?.data) {
           doneRef.current = true;
           if (navigator.vibrate) navigator.vibrate(60);
-          onResult(code.data);
+          onResultRef.current(code.data);
           return;
         }
       }
@@ -69,9 +92,9 @@ export function QrScanner({ onResult, active = true }: Props) {
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((tr) => tr.stop());
+      stop();
     };
-  }, [active, onResult, t]);
+  }, [active]);
 
   return (
     <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-black">

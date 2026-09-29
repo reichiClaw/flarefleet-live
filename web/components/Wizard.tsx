@@ -87,23 +87,33 @@ export interface ReadingsState {
   operating_hours: string;
 }
 
+// Browsers let some unparseable text through a number input; NaN must never be sent.
+export function readingNumber(raw: string): number | null {
+  const n = Number(raw.trim().replace(",", "."));
+  return raw.trim() === "" || !Number.isFinite(n) ? null : n;
+}
+
 export function readingsToPayload(r: ReadingsState, mode: MeterMode) {
   const req = meterRequirements(mode);
   return {
-    odometer_km: req.odometer && r.odometer_km !== "" ? Number(r.odometer_km) : null,
-    operating_hours: req.hours && r.operating_hours !== "" ? Number(r.operating_hours.replace(",", ".")) : null,
+    odometer_km: req.odometer ? readingNumber(r.odometer_km) : null,
+    operating_hours: req.hours ? readingNumber(r.operating_hours) : null,
   };
 }
 
 export function validateReadings(r: ReadingsState, vehicle: Vehicle, required: boolean, t: (k: string, p?: Record<string, string | number>) => string): string | null {
   const req = meterRequirements(vehicle.meter_mode);
   if (req.odometer) {
-    if (required && r.odometer_km === "") return `${t("vehicle.odometer")}: ${t("common.required")}`;
-    if (r.odometer_km !== "" && vehicle.odometer_km != null && Number(r.odometer_km) < vehicle.odometer_km) return `${t("vehicle.odometer")} < ${vehicle.odometer_km}`;
+    const odo = readingNumber(r.odometer_km);
+    if (required && odo == null) return `${t("vehicle.odometer")}: ${t("common.required")}`;
+    if (r.odometer_km.trim() !== "" && odo == null) return `${t("vehicle.odometer")}: ${t("common.invalid_number")}`;
+    if (odo != null && vehicle.odometer_km != null && odo < vehicle.odometer_km) return `${t("vehicle.odometer")} < ${vehicle.odometer_km}`;
   }
   if (req.hours) {
-    if (required && r.operating_hours === "") return `${t("vehicle.hours")}: ${t("common.required")}`;
-    if (r.operating_hours !== "" && vehicle.operating_hours != null && Number(r.operating_hours.replace(",", ".")) < vehicle.operating_hours) return `${t("vehicle.hours")} < ${vehicle.operating_hours}`;
+    const hours = readingNumber(r.operating_hours);
+    if (required && hours == null) return `${t("vehicle.hours")}: ${t("common.required")}`;
+    if (r.operating_hours.trim() !== "" && hours == null) return `${t("vehicle.hours")}: ${t("common.invalid_number")}`;
+    if (hours != null && vehicle.operating_hours != null && hours < vehicle.operating_hours) return `${t("vehicle.hours")} < ${vehicle.operating_hours}`;
   }
   return null;
 }

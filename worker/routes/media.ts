@@ -16,7 +16,7 @@ media.post("/", async (c) => {
   const file = form.get("file");
   if (!(file instanceof File)) throw badRequest("validation", { file: "required" });
   const kind = form.get("kind") === "signature" ? "signature" : "photo";
-  const caption = String(form.get("caption") ?? "");
+  const caption = String(form.get("caption") ?? "").trim().slice(0, 200);
   const item = await stageUpload(c.env, c.get("user").id, kind, file, file.name || `${kind}.jpg`, caption);
   return c.json(item, 201);
 });
@@ -37,7 +37,8 @@ media.get("/:id", async (c) => {
 
 media.patch("/:id", async (c) => {
   const input = await parseBody(c, MediaCaptionSchema);
-  const m = await one<MediaRow>(c.env.DB, "SELECT * FROM media WHERE id = ? AND attached_at IS NULL", c.req.param("id"));
+  // Only the uploader may still touch a staged file; attached evidence is immutable.
+  const m = await one<MediaRow>(c.env.DB, "SELECT * FROM media WHERE id = ? AND uploaded_by = ? AND attached_at IS NULL", c.req.param("id"), c.get("user").id);
   if (!m) throw notFound();
   await stmt(c.env.DB, "UPDATE media SET caption = ? WHERE id = ?", input.caption, m.id).run();
   return c.json({ ok: true });
@@ -45,7 +46,12 @@ media.patch("/:id", async (c) => {
 
 /** Discards a staged (not yet attached) upload. Attached evidence is immutable. */
 media.delete("/:id", async (c) => {
-  const m = await one<MediaRow>(c.env.DB, "SELECT * FROM media WHERE id = ? AND attached_at IS NULL AND discarded_at IS NULL", c.req.param("id"));
+  const m = await one<MediaRow>(
+    c.env.DB,
+    "SELECT * FROM media WHERE id = ? AND uploaded_by = ? AND attached_at IS NULL AND discarded_at IS NULL",
+    c.req.param("id"),
+    c.get("user").id,
+  );
   if (!m) throw notFound();
   await stmt(c.env.DB, "UPDATE media SET discarded_at = ? WHERE id = ?", now(), m.id).run();
   c.executionCtx.waitUntil(c.env.MEDIA.delete(m.r2_key));

@@ -84,6 +84,19 @@ export function shapeProtocol(r: ProtocolRowFull, withSnapshot: boolean): Protoc
 const PROTOCOL_SELECT =
   "SELECT p.*, u.name AS performed_by_name, co.name AS company_name FROM protocols p JOIN users u ON u.id = p.performed_by LEFT JOIN companies co ON co.id = p.company_id";
 
+const PROTOCOL_TYPES = new Set([
+  "check_in",
+  "loan_checkout",
+  "loan_return",
+  "check_out",
+  "maintenance_start",
+  "maintenance_end",
+  "damage_resolved",
+  "status_correction",
+]);
+const PDF_STATUSES = new Set(["pending", "generated", "failed", "none"]);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+
 const protocols = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 protocols.use("*", requireAuth("user"));
 
@@ -97,7 +110,7 @@ protocols.get("/", async (c) => {
   const status = url.searchParams.get("pdf_status");
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
-  if (type) {
+  if (type && PROTOCOL_TYPES.has(type)) {
     where.push("p.type = ?");
     params.push(type);
   }
@@ -106,17 +119,17 @@ protocols.get("/", async (c) => {
     where.push("p.vehicle_id = ?");
     params.push(vehicleId);
   }
-  if (status) {
+  if (status && PDF_STATUSES.has(status)) {
     where.push("p.pdf_status = ?");
     params.push(status);
   }
-  if (from) {
+  if (from && DATE_RE.test(from)) {
     where.push("p.performed_at >= ?");
-    params.push(from);
+    params.push(from.slice(0, 10));
   }
-  if (to) {
+  if (to && DATE_RE.test(to)) {
     where.push("p.performed_at <= ?");
-    params.push(`${to}T23:59:59.999Z`);
+    params.push(`${to.slice(0, 10)}T23:59:59.999Z`);
   }
   if (q) {
     where.push("(p.number LIKE ? OR p.snapshot LIKE ?)");

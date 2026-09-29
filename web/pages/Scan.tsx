@@ -1,4 +1,4 @@
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { VehicleStatus } from "@shared/types";
@@ -81,10 +81,11 @@ export function PublicQrPage() {
   const nav = useNavigate();
   const q = useQuery<PublicVehicle>({ queryKey: ["public-qr", code], queryFn: () => api.get(`/api/public/qr/${encodeURIComponent(code!)}`), retry: false });
 
-  if (q.data?.id && me) {
-    nav(`/vehicles/${q.data.id}`, { replace: true });
-    return null;
-  }
+  const targetId = me ? q.data?.id : undefined;
+  useEffect(() => {
+    if (targetId) nav(`/vehicles/${targetId}`, { replace: true });
+  }, [targetId, nav]);
+  if (targetId) return <Loading />;
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-slate-100 px-4">

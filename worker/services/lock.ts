@@ -41,7 +41,7 @@ export async function withVehicleLock<T>(env: Env, vehicleId: string, fn: () => 
   try {
     token = await stub.acquire();
   } catch {
-    throw new ApiError(423, "rate_limited");
+    throw new ApiError(423, "vehicle_busy");
   }
   try {
     return await fn();

@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { Language } from "@shared/types";
 
 type Dict = Record<string, string>;
@@ -33,6 +33,7 @@ const de: Dict = {
   "common.no": "Nein",
   "common.optional": "optional",
   "common.required": "Pflichtfeld",
+  "common.invalid_number": "Ungültige Zahl",
   "common.error": "Fehler",
   "common.retry": "Erneut versuchen",
   "common.empty": "Keine Einträge.",
@@ -222,6 +223,7 @@ const de: Dict = {
   "wf.damages": "Schäden",
   "wf.add_damage": "Schaden hinzufügen",
   "wf.damage_description": "Beschreibung des Schadens",
+  "wf.damage_required": "Bitte mindestens einen Schaden hinzufügen und beschreiben.",
   "wf.damage_severity": "Schwere",
   "wf.damage_photos": "Fotos zum Schaden",
   "wf.signature": "Unterschrift",
@@ -327,6 +329,11 @@ const de: Dict = {
   "users.deactivate": "Deaktivieren",
   "users.activate": "Aktivieren",
   "users.must_change": "Muss Passwort ändern",
+  "users.delete": "Benutzer löschen",
+  "users.delete_confirm": "{name} ({email}) wirklich löschen? Der Zugang wird sofort ungültig.",
+  "users.delete_hint": "Hat der Benutzer bereits Protokolle erstellt, bleibt sein Name in diesen Protokollen erhalten – das ist für die Nachweiskette nötig. Die E-Mail-Adresse wird wieder frei.",
+  "users.deleted": "Benutzer gelöscht.",
+  "users.deleted_anonymized": "Benutzer gelöscht. Der Name bleibt in bestehenden Protokollen sichtbar.",
 
   "settings.title": "Einstellungen",
   "settings.general": "Allgemein",
@@ -423,6 +430,7 @@ const en: Dict = {
   "common.no": "No",
   "common.optional": "optional",
   "common.required": "Required",
+  "common.invalid_number": "Invalid number",
   "common.error": "Error",
   "common.retry": "Retry",
   "common.empty": "No entries.",
@@ -612,6 +620,7 @@ const en: Dict = {
   "wf.damages": "Damages",
   "wf.add_damage": "Add damage",
   "wf.damage_description": "Damage description",
+  "wf.damage_required": "Please add and describe at least one damage.",
   "wf.damage_severity": "Severity",
   "wf.damage_photos": "Damage photos",
   "wf.signature": "Signature",
@@ -717,6 +726,11 @@ const en: Dict = {
   "users.deactivate": "Deactivate",
   "users.activate": "Activate",
   "users.must_change": "Must change password",
+  "users.delete": "Delete user",
+  "users.delete_confirm": "Really delete {name} ({email})? Access stops immediately.",
+  "users.delete_hint": "If the user already created protocols, their name stays on those protocols – this is required for the evidence trail. The e-mail address becomes available again.",
+  "users.deleted": "User deleted.",
+  "users.deleted_anonymized": "User deleted. The name remains visible on existing protocols.",
 
   "settings.title": "Settings",
   "settings.general": "General",
@@ -796,8 +810,10 @@ export function translate(lang: Language, key: string, params?: Record<string, s
 const I18nContext = createContext<{ lang: Language; t: TFn }>({ lang: "de", t: (k, p) => translate("de", k, p) });
 
 export function I18nProvider({ lang, children }: { lang: Language; children: ReactNode }) {
-  const t: TFn = (k, p) => translate(lang, k, p);
-  return <I18nContext.Provider value={{ lang, t }}>{children}</I18nContext.Provider>;
+  // Stable per language: `t` ends up in effect dependencies (for example the
+  // camera in QrScanner), so a new function on every render would restart them.
+  const value = useMemo(() => ({ lang, t: ((k, p) => translate(lang, k, p)) as TFn }), [lang]);
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
 export function useT() {

@@ -57,6 +57,9 @@ app.onError((err, c) => {
   if (/UNIQUE constraint failed: vehicles\.internal/.test(msg)) return new ApiError(409, "duplicate_number").toResponse(lang);
   if (/UNIQUE constraint failed: users\.email/.test(msg)) return new ApiError(409, "email_taken").toResponse(lang);
   if (/UNIQUE constraint failed: loans/.test(msg)) return new ApiError(409, "active_loan").toResponse(lang);
+  if (/UNIQUE constraint failed: categories\.name/.test(msg)) return new ApiError(409, "duplicate_name").toResponse(lang);
+  // A dangling reference is bad input, not a server fault.
+  if (/FOREIGN KEY constraint failed/.test(msg)) return new ApiError(400, "invalid_reference").toResponse(lang);
   console.error("unhandled", err);
   return new ApiError(500, "internal").toResponse(lang);
 });

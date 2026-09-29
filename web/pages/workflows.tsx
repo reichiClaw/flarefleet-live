@@ -172,7 +172,7 @@ export function CheckInPage() {
         {
           key: "condition",
           title: t("wf.step_condition"),
-          validate: () => (condition === "damaged" && damagesPayload(damages).length === 0 ? t("wf.damage_description") : null),
+          validate: () => (condition === "damaged" && damagesPayload(damages).length === 0 ? t("wf.damage_required") : null),
           content: (
             <Card>
               <div className="space-y-4">
@@ -482,7 +482,7 @@ export function ReturnPage() {
         {
           key: "condition",
           title: t("wf.step_condition"),
-          validate: () => (condition === "damaged" && damagesPayload(damages).length === 0 ? t("wf.damage_description") : null),
+          validate: () => (condition === "damaged" && damagesPayload(damages).length === 0 ? t("wf.damage_required") : null),
           content: (
             <Card>
               <div className="space-y-4">
@@ -625,6 +625,7 @@ export function CheckOutPage() {
         {
           key: "condition",
           title: t("wf.step_condition"),
+          validate: () => (condition === "damaged" && damagesPayload(damages).length === 0 ? t("wf.damage_required") : null),
           content: (
             <Card>
               <div className="space-y-4">

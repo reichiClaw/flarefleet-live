@@ -88,7 +88,7 @@ auth.post("/login", async (c) => {
   const ip = c.get("ip");
   if (!(await rateLimit(c.env, `login:${ip}`, 20, 60))) throw new ApiError(429, "rate_limited");
   const input = await parseBody(c, LoginSchema);
-  const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE email = ?", input.email);
+  const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE email = ? AND deleted_at IS NULL", input.email);
   const ts = now();
   if (u && u.locked_until && u.locked_until > ts) throw new ApiError(423, "account_locked");
   const ok = u ? await verifyPassword(input.password, u.password_hash) : false;
@@ -159,7 +159,7 @@ auth.post("/forgot-password", async (c) => {
   const ip = c.get("ip");
   if (!(await rateLimit(c.env, `forgot:${ip}`, 5, 300))) throw new ApiError(429, "rate_limited");
   const input = await parseBody(c, ForgotPasswordSchema);
-  const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE email = ? AND is_active = 1", input.email);
+  const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE email = ? AND is_active = 1 AND deleted_at IS NULL", input.email);
   const settings = await loadSettings(c.env);
   if (u && emailAvailable(c.env, settings)) {
     const token = randomToken(24);
@@ -176,7 +176,7 @@ auth.post("/reset-password", async (c) => {
   const input = await parseBody(c, ResetPasswordSchema);
   const userId = await c.env.KV.get(`pwreset:${input.token}`);
   if (!userId) throw badRequest("invalid_token");
-  const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE id = ? AND is_active = 1", userId);
+  const u = await one<UserRow>(c.env.DB, "SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL", userId);
   if (!u) throw badRequest("invalid_token");
   await stmt(c.env.DB, "UPDATE users SET password_hash = ?, must_change_password = 0, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?", await hashPassword(input.new_password, pbkdf2Iterations(c.env)), now(), u.id).run();
   await c.env.KV.delete(`pwreset:${input.token}`);

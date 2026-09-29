@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AuditEntry, Paginated } from "@shared/types";
 import { api, qs } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { useDebouncedParam } from "../lib/hooks";
 import { fmtDateTime } from "../lib/format";
 import { Button, EmptyState, ErrorBox, Input, Loading, PageHeader, Pagination } from "../components/ui";
 
@@ -12,6 +13,8 @@ export function AuditPage() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const action = params.get("action") ?? "";
+  const [search, setSearch] = useDebouncedParam("q");
+  const [actionFilter, setActionFilter] = useDebouncedParam("action");
   const page = Number(params.get("page") ?? 1);
   const set = (k: string, v: string) => {
     const next = new URLSearchParams(params);
@@ -39,9 +42,14 @@ export function AuditPage() {
           </a>
         }
       />
+      {/* The controls carry w-full, so the row sizes them through wrappers. */}
       <div className="flex gap-2">
-        <Input type="search" placeholder={t("common.search")} defaultValue={q} onChange={(e) => set("q", e.target.value)} className="flex-1" />
-        <Input placeholder={t("audit.action")} defaultValue={action} onChange={(e) => set("action", e.target.value)} className="w-40" list="audit-actions" />
+        <div className="min-w-0 flex-1">
+          <Input type="search" placeholder={t("common.search")} value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="w-40 shrink-0">
+          <Input placeholder={t("audit.action")} value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} list="audit-actions" />
+        </div>
         <datalist id="audit-actions">
           {["auth.", "vehicle.", "loan.", "damage.", "maintenance.", "import.", "user.", "settings.", "protocol.", "company.", "driver.", "category."].map((a) => (
             <option key={a} value={a} />

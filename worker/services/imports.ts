@@ -1,10 +1,11 @@
 import type { ImportJob, ImportRow, Language } from "@shared/types";
 import type { Env, SessionUser } from "../env";
-import { all, json, now, one, stmt, uid } from "../lib/db";
+import { all, json, now, one, reserveSequence, stmt, uid } from "../lib/db";
 import { badRequest, conflict, notFound } from "../lib/errors";
 import { auditStatement } from "../lib/audit";
+import { formatInternalNumber } from "@shared/domain";
 import { excelSerialToDate, readCsv, readXlsx, writeXlsx, type CellValue } from "../lib/xlsx";
-import { allocateInternalNumber, newQrCode } from "./vehicles";
+import { newQrCode } from "./vehicles";
 
 export const IMPORT_COLUMNS = [
   "internal_number",
@@ -82,10 +83,28 @@ function cellDate(v: CellValue): string | null {
   return "invalid";
 }
 
+/**
+ * Accepts both notations found in real sheets: "1.234,5" (German) and "1,234.5"
+ * or "12.5" (English). The last separator present decides which one is decimal,
+ * so a plain "12.5" is no longer read as 125.
+ */
 function cellNumber(v: CellValue): number | null | "invalid" {
   if (v === null || v === "") return null;
   if (typeof v === "number") return v;
-  const n = Number(String(v).replace(/\./g, "").replace(",", "."));
+  const raw = String(v).trim().replace(/\s|'|\u00a0/g, "");
+  if (!raw) return null;
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+  if (lastComma >= 0 && lastDot >= 0) {
+    normalized = lastComma > lastDot ? raw.replace(/\./g, "").replace(",", ".") : raw.replace(/,/g, "");
+  } else if (lastComma >= 0) {
+    // A single comma is a decimal separator unless it groups thousands ("1,234").
+    normalized = /,\d{3}$/.test(raw) && raw.length > 4 ? raw.replace(/,/g, "") : raw.replace(",", ".");
+  } else if (lastDot >= 0) {
+    normalized = /\.\d{3}$/.test(raw) && raw.length > 4 ? raw.replace(/\./g, "") : raw;
+  }
+  const n = Number(normalized);
   return Number.isFinite(n) ? n : "invalid";
 }
 
@@ -265,10 +284,8 @@ export async function createImportJob(env: Env, user: SessionUser, lang: Languag
   return getImportJob(env, id, true);
 }
 
-export async function getImportJob(env: Env, id: string, withRows: boolean): Promise<ImportJob> {
-  const j = await one<Record<string, unknown>>(env.DB, "SELECT * FROM import_jobs WHERE id = ?", id);
-  if (!j) throw notFound();
-  const job: ImportJob = {
+function shapeJob(j: Record<string, unknown>): ImportJob {
+  return {
     id: j.id as string,
     filename: j.filename as string,
     status: j.status as ImportJob["status"],
@@ -282,6 +299,12 @@ export async function getImportJob(env: Env, id: string, withRows: boolean): Pro
     committed_at: (j.committed_at as string | null) ?? null,
     created_at: j.created_at as string,
   };
+}
+
+export async function getImportJob(env: Env, id: string, withRows: boolean): Promise<ImportJob> {
+  const j = await one<Record<string, unknown>>(env.DB, "SELECT * FROM import_jobs WHERE id = ?", id);
+  if (!j) throw notFound();
+  const job = shapeJob(j);
   if (withRows) {
     const rows = await all<Record<string, unknown>>(env.DB, "SELECT * FROM import_rows WHERE job_id = ? ORDER BY row_number", id);
     job.rows = rows.map((r) => ({
@@ -298,7 +321,7 @@ export async function getImportJob(env: Env, id: string, withRows: boolean): Pro
 
 export async function listImportJobs(env: Env): Promise<ImportJob[]> {
   const rows = await all<Record<string, unknown>>(env.DB, "SELECT * FROM import_jobs ORDER BY created_at DESC LIMIT 50");
-  return Promise.all(rows.map((r) => getImportJob(env, r.id as string, false)));
+  return rows.map(shapeJob);
 }
 
 export async function commitImportJob(env: Env, user: SessionUser, lang: Language, id: string, onlyValid: boolean, ip: string): Promise<ImportJob> {
@@ -320,6 +343,25 @@ export async function commitImportJob(env: Env, user: SessionUser, lang: Languag
   let updated = 0;
   const categoryIds = new Map(lookups.categories);
   const supplierIds = new Map(lookups.suppliers);
+
+  // Reserve every internal number we may need in a single round trip instead of
+  // one sequence query per row.
+  const needsNumber = revalidated.filter(
+    (r) => r.action === "create" && !cellString(r.data.internal_number as CellValue),
+  ).length;
+  const taken = new Set(lookups.byInternal.keys());
+  const reserved: string[] = [];
+  if (needsNumber) {
+    for (const n of await reserveSequence(env.DB, "vehicle", needsNumber)) {
+      const candidate = formatInternalNumber(n);
+      if (!taken.has(norm(candidate))) reserved.push(candidate);
+    }
+    // Extremely rare: a reserved number collides with a manually assigned one.
+    while (reserved.length < needsNumber) {
+      const candidate = formatInternalNumber((await reserveSequence(env.DB, "vehicle", 1))[0]);
+      if (!taken.has(norm(candidate))) reserved.push(candidate);
+    }
+  }
 
   for (const r of revalidated) {
     if (r.action === "error") {
@@ -388,7 +430,7 @@ export async function commitImportJob(env: Env, user: SessionUser, lang: Languag
     } else {
       created++;
       const vehicleId = uid();
-      const internal = cellString(d.internal_number as CellValue) || (await allocateInternalNumber(env));
+      const internal = cellString(d.internal_number as CellValue) || reserved.shift()!;
       statements.push(
         stmt(
           env.DB,

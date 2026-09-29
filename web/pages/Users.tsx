@@ -35,6 +35,7 @@ export function UsersPage() {
   const [creating, setCreating] = useState<NewUser | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [secret, setSecret] = useState<{ password: string | null; invited: boolean } | null>(null);
+  const [deleting, setDeleting] = useState<UserRow | null>(null);
   const q = useQuery<{ results: UserRow[] }>({ queryKey: ["users"], queryFn: () => api.get("/api/users") });
   const emailEnabled = !!me?.settings.email_enabled;
 
@@ -65,7 +66,19 @@ export function UsersPage() {
     onError: (e) => toast.push(errorMessage(e), "error"),
   });
 
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete<{ mode: "removed" | "anonymized" }>(`/api/users/${id}`),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setDeleting(null);
+      setEditing(null);
+      toast.push(r.mode === "removed" ? t("users.deleted") : t("users.deleted_anonymized"));
+    },
+    onError: (e) => toast.push(errorMessage(e), "error"),
+  });
+
   const roleOptions: Role[] = me?.role === "super_admin" ? ["user", "admin", "super_admin"] : ["user", "admin"];
+  const canDelete = (u: UserRow) => u.id !== me?.id && (u.role !== "super_admin" || me?.role === "super_admin");
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -139,13 +152,20 @@ export function UsersPage() {
         onClose={() => setEditing(null)}
         title={editing?.email}
         footer={
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => editing && reset.mutate(editing.id)} loading={reset.isPending}>
-              {t("users.reset_password")}
-            </Button>
-            <Button className="flex-1" onClick={() => editing && update.mutate(editing)} loading={update.isPending}>
-              {t("common.save")}
-            </Button>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => editing && reset.mutate(editing.id)} loading={reset.isPending}>
+                {t("users.reset_password")}
+              </Button>
+              <Button className="flex-1" onClick={() => editing && update.mutate(editing)} loading={update.isPending}>
+                {t("common.save")}
+              </Button>
+            </div>
+            {editing && canDelete(editing) && (
+              <Button variant="ghost" className="w-full text-red-700" onClick={() => setDeleting(editing)}>
+                {t("users.delete")}
+              </Button>
+            )}
           </div>
         }
       >
@@ -174,6 +194,25 @@ export function UsersPage() {
             <Toggle checked={editing.is_active} onChange={(v) => setEditing({ ...editing, is_active: v })} label={t("common.active")} />
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={t("users.delete")}
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setDeleting(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" className="flex-1" onClick={() => deleting && remove.mutate(deleting.id)} loading={remove.isPending}>
+              {t("users.delete")}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-700">{t("users.delete_confirm", { name: deleting?.name ?? "", email: deleting?.email ?? "" })}</p>
+        <p className="mt-2 text-xs text-slate-500">{t("users.delete_hint")}</p>
       </Modal>
 
       <Modal open={!!secret} onClose={() => setSecret(null)} title={t("users.reset_password")} footer={<Button className="w-full" onClick={() => setSecret(null)}>{t("common.close")}</Button>}>

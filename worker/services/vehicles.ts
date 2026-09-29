@@ -1,9 +1,10 @@
 import type { Loan, MeterMode, Role, Vehicle, VehicleStatus, VehicleSummary } from "@shared/types";
+import { VEHICLE_STATUSES } from "@shared/types";
 import { formatInternalNumber, randomQrCode, vehicleCapabilities } from "@shared/domain";
 import type { VehicleCreateInput, VehicleUpdateInput } from "@shared/schemas";
 import type { Env, SessionUser } from "../env";
 import { all, nextSequence, now, one, paginate, parsePage, stmt, uid } from "../lib/db";
-import { conflict, notFound } from "../lib/errors";
+import { badRequest, conflict, notFound } from "../lib/errors";
 import { randomBytes } from "../lib/crypto";
 import { auditStatement } from "../lib/audit";
 
@@ -34,6 +35,8 @@ export interface VehicleRow {
   updated_at: string;
   open_damage_count: number;
 }
+
+const KNOWN_STATUSES = new Set<string>(VEHICLE_STATUSES);
 
 export const VEHICLE_SELECT = `
   SELECT v.*, c.name AS category_name, c.meter_mode, s.name AS supplier_name,
@@ -92,8 +95,15 @@ export async function getVehicleRow(env: Env, id: string): Promise<VehicleRow> {
   return v;
 }
 
-export async function getVehicleByQr(env: Env, qr: string): Promise<VehicleRow | null> {
-  return one<VehicleRow>(env.DB, `${VEHICLE_SELECT} WHERE v.qr_code = ? OR v.internal_number = ? COLLATE NOCASE`, qr, qr);
+/**
+ * Looks up a vehicle by its QR code. Signed-in users may also use the internal
+ * number (typed into the scan page); the public sticker page must not, or the
+ * sequential numbers would make every vehicle enumerable without a login.
+ */
+export async function getVehicleByQr(env: Env, qr: string, allowInternalNumber = true): Promise<VehicleRow | null> {
+  return allowInternalNumber
+    ? one<VehicleRow>(env.DB, `${VEHICLE_SELECT} WHERE v.qr_code = ? OR v.internal_number = ? COLLATE NOCASE`, qr, qr)
+    : one<VehicleRow>(env.DB, `${VEHICLE_SELECT} WHERE v.qr_code = ?`, qr);
 }
 
 export async function getActiveLoan(env: Env, vehicleId: string): Promise<LoanRow | null> {
@@ -149,10 +159,10 @@ export async function listVehicles(env: Env, url: URL) {
     const like = `%${q}%`;
     params.push(like, like, like, like, like, like, like);
   }
-  if (status) {
-    const list = status.split(",").filter(Boolean);
-    where.push(`v.status IN (${list.map(() => "?").join(",")})`);
-    params.push(...list);
+  const statusList = status ? status.split(",").filter((s) => KNOWN_STATUSES.has(s)) : [];
+  if (statusList.length) {
+    where.push(`v.status IN (${statusList.map(() => "?").join(",")})`);
+    params.push(...statusList);
   } else if (!includeArchived) {
     where.push("v.status <> 'archived'");
   }
@@ -207,9 +217,16 @@ export function newQrCode(): string {
   return randomQrCode(randomBytes);
 }
 
+/** Fails with a readable 400 instead of an opaque FOREIGN KEY error from D1. */
+async function assertReference(env: Env, table: "categories" | "companies", id: string | null | undefined, field: string) {
+  if (!id) return;
+  const row = await one<{ id: string }>(env.DB, `SELECT id FROM ${table} WHERE id = ?`, id);
+  if (!row) throw badRequest("invalid_reference", { [field]: "not_found" });
+}
+
 export async function createVehicle(env: Env, user: SessionUser, input: VehicleCreateInput, ip: string, source = "manual"): Promise<Vehicle> {
-  const category = await one<{ id: string }>(env.DB, "SELECT id FROM categories WHERE id = ?", input.category_id);
-  if (!category) throw notFound("not_found");
+  await assertReference(env, "categories", input.category_id, "category_id");
+  await assertReference(env, "companies", input.supplier_id, "supplier_id");
   const internal = input.internal_number || (await allocateInternalNumber(env));
   await assertUnique(env, "internal_number", internal);
   await assertUnique(env, "serial_number", input.serial_number);
@@ -282,6 +299,8 @@ export async function updateVehicle(env: Env, user: SessionUser, id: string, inp
     const normalized = v === "" && (f === "external_key" || f === "expected_arrival" || f === "return_due") ? null : v;
     if ((current as unknown as Record<string, unknown>)[f] !== normalized) changes[f] = normalized;
   }
+  if (typeof changes.category_id === "string") await assertReference(env, "categories", changes.category_id, "category_id");
+  if (typeof changes.supplier_id === "string") await assertReference(env, "companies", changes.supplier_id, "supplier_id");
   if (typeof changes.internal_number === "string") await assertUnique(env, "internal_number", changes.internal_number, id);
   if (typeof changes.serial_number === "string") await assertUnique(env, "serial_number", changes.serial_number, id);
   if (typeof changes.license_plate === "string") await assertUnique(env, "license_plate", changes.license_plate, id);

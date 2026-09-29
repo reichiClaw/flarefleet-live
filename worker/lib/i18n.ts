@@ -51,6 +51,12 @@ const de: Dict = {
   "errors.pdf_not_ready": "Das PDF ist noch nicht verfügbar.",
   "errors.public_qr_disabled": "Die öffentliche QR-Seite ist deaktiviert.",
   "errors.company_type": "Der gewählte Partner hat nicht den passenden Typ.",
+  "errors.invalid_reference": "Ein ausgewählter Eintrag existiert nicht mehr. Bitte Auswahl aktualisieren.",
+  "errors.duplicate_name": "Dieser Name ist bereits vergeben.",
+  "errors.damage_not_open": "Ein ausgewählter Schaden ist nicht (mehr) offen. Bitte Seite neu laden.",
+  "errors.vehicle_busy": "Das Fahrzeug wird gerade bearbeitet. Bitte in einem Moment erneut versuchen.",
+  "errors.cannot_delete_self": "Das eigene Konto kann nicht gelöscht werden.",
+  "errors.user_deleted": "Dieses Konto wurde gelöscht.",
   "errors.internal": "Unerwarteter Fehler. Bitte erneut versuchen.",
 
   // enums
@@ -173,6 +179,12 @@ const en: Dict = {
   "errors.pdf_not_ready": "The PDF is not available yet.",
   "errors.public_qr_disabled": "The public QR page is disabled.",
   "errors.company_type": "The selected partner does not have the right type.",
+  "errors.invalid_reference": "A selected entry no longer exists. Please refresh your selection.",
+  "errors.duplicate_name": "This name is already in use.",
+  "errors.damage_not_open": "One of the selected damages is no longer open. Please reload the page.",
+  "errors.vehicle_busy": "This vehicle is being processed right now. Please try again in a moment.",
+  "errors.cannot_delete_self": "You cannot delete your own account.",
+  "errors.user_deleted": "This account has been deleted.",
   "errors.internal": "Unexpected error. Please try again.",
 
   "status.announced": "Announced",
