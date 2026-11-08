@@ -2,8 +2,11 @@ name: Sync Upstream
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Läuft jeden Tag um Mitternacht
-  workflow_dispatch: # Erlaubt es dir, den Sync jederzeit manuell per Klick zu starten
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   sync:
@@ -12,6 +15,7 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Sync upstream
@@ -20,5 +24,6 @@ jobs:
           target_sync_branch: main
           target_repo_token: ${{ secrets.GITHUB_TOKEN }}
           upstream_sync_branch: main
-          upstream_sync_repo: reichiClaw/FlareFleet # <--- HIER ANPASSEN!
+          upstream_sync_repo: reichiClaw/FlareFleet
+          shallow_since: '2026-01-01'
           test_mode: false
