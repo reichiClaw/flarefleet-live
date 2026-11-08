@@ -295,18 +295,25 @@ export function ReservationsPage() {
   const [params, setParams] = useSearchParams();
   const scope = (params.get("scope") as Scope) || "upcoming";
   const page = Number(params.get("page") ?? 1);
+  const term = params.get("q") ?? "";
   const [q, setQ] = useDebouncedParam("q");
   const [createOpen, setCreateOpen] = useState(false);
   const [cancelling, setCancelling] = useState<Reservation | null>(null);
+  // The search runs on the server, otherwise a match on another page would look like it does not exist.
   const query = useQuery<Paginated<Reservation>>({
-    queryKey: ["reservations", scope, page],
-    queryFn: () => api.get(`/api/reservations${qs({ scope, page })}`),
+    queryKey: ["reservations", scope, page, term],
+    queryFn: () => api.get(`/api/reservations${qs({ scope, page, q: term })}`),
     placeholderData: (prev) => prev,
   });
-  const term = q.trim().toLowerCase();
-  const results = (query.data?.results ?? []).filter(
-    (r) => !term || `${r.borrower_name} ${r.company_name ?? ""} ${r.vehicle?.internal_number ?? ""} ${r.vehicle?.manufacturer ?? ""} ${r.vehicle?.model ?? ""}`.toLowerCase().includes(term),
-  );
+  const results = query.data?.results ?? [];
+
+  const set = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    if (key !== "page") next.delete("page");
+    setParams(next);
+  };
 
   return (
     <div>
@@ -318,7 +325,7 @@ export function ReservationsPage() {
       <div className="space-y-3">
         <SegmentedControl<Scope>
           value={scope}
-          onChange={(v) => setParams({ scope: v })}
+          onChange={(v) => set("scope", v)}
           options={[
             { value: "upcoming", label: t("res.upcoming") },
             { value: "all", label: t("res.all") },
@@ -341,7 +348,7 @@ export function ReservationsPage() {
             ))}
           </div>
         )}
-        {query.data && <Pagination page={query.data.page} pageSize={query.data.page_size} count={query.data.count} onPage={(p) => setParams({ scope, page: String(p) })} />}
+        {query.data && <Pagination page={query.data.page} pageSize={query.data.page_size} count={query.data.count} onPage={(p) => set("page", String(p))} />}
       </div>
 
       <ReserveModal open={createOpen} onClose={() => setCreateOpen(false)} />

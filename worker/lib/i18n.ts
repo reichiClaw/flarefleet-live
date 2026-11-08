@@ -56,6 +56,7 @@ const de: Dict = {
   "errors.reservation_overlap": "Für diesen Zeitraum ist das Fahrzeug bereits vorreserviert ({borrower}, {from} – {to}).",
   "errors.reservation_conflict": "Das Fahrzeug ist für diesen Zeitraum vorreserviert ({borrower}, {from} – {to}).",
   "errors.reservation_past": "Das Ende der Vorreservierung liegt in der Vergangenheit.",
+  "errors.reservation_window": "Die Ausleihe deckt den vorreservierten Zeitraum ({from} – {to}) nicht ab. Bitte geplante Rückgabe anpassen oder die Vorreservierung stornieren.",
   "errors.reservation_closed": "Diese Vorreservierung ist nicht mehr offen ({status}).",
   "errors.cannot_delete_self": "Das eigene Konto kann nicht gelöscht werden.",
   "errors.user_deleted": "Dieses Konto wurde gelöscht.",
@@ -131,7 +132,8 @@ const de: Dict = {
   "email.overdue.intro": "Folgende Ausleihen sind überfällig:",
   "email.protocol.subject": "{org}: {type} {number} – {vehicle}",
   "email.protocol.body": "Im Anhang finden Sie das Protokoll {number} ({type}) für {vehicle}.\n\n{notes}",
-  "email.protocol.body_no_attachment": "Das Protokoll {number} ({type}) für {vehicle} wurde erstellt. Es ist zu groß für den E-Mail-Anhang und steht hier zum Abruf bereit:\n{link}\n\n{notes}",
+  "email.protocol.body_no_attachment": "Das Protokoll {number} ({type}) für {vehicle} wurde erstellt. Es ist zu groß für den E-Mail-Anhang und steht 30 Tage lang hier zum Download bereit:\n{link}\n\n{notes}",
+  "email.protocol.body_too_large": "Das Protokoll {number} ({type}) für {vehicle} wurde erstellt. Es ist zu groß für den E-Mail-Anhang; bitte fordern Sie es beim Fuhrpark an.\n\n{notes}",
 };
 
 const en: Dict = {
@@ -187,6 +189,7 @@ const en: Dict = {
   "errors.reservation_overlap": "The vehicle is already reserved for this period ({borrower}, {from} – {to}).",
   "errors.reservation_conflict": "The vehicle is reserved for this period ({borrower}, {from} – {to}).",
   "errors.reservation_past": "The end of the reservation is in the past.",
+  "errors.reservation_window": "The loan does not cover the reserved period ({from} – {to}). Please adjust the planned return or cancel the reservation.",
   "errors.reservation_closed": "This reservation is no longer open ({status}).",
   "errors.cannot_delete_self": "You cannot delete your own account.",
   "errors.user_deleted": "This account has been deleted.",
@@ -259,7 +262,8 @@ const en: Dict = {
   "email.overdue.intro": "The following loans are overdue:",
   "email.protocol.subject": "{org}: {type} {number} – {vehicle}",
   "email.protocol.body": "Attached is protocol {number} ({type}) for {vehicle}.\n\n{notes}",
-  "email.protocol.body_no_attachment": "Protocol {number} ({type}) for {vehicle} has been created. It is too large to attach and can be downloaded here:\n{link}\n\n{notes}",
+  "email.protocol.body_no_attachment": "Protocol {number} ({type}) for {vehicle} has been created. It is too large to attach and can be downloaded here for 30 days:\n{link}\n\n{notes}",
+  "email.protocol.body_too_large": "Protocol {number} ({type}) for {vehicle} has been created. It is too large to attach; please request it from the fleet office.\n\n{notes}",
 };
 
 const dicts: Record<Language, Dict> = { de, en };

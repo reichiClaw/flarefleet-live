@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Company, Condition, Damage, Driver, MediaItem, ProtocolType, Vehicle, VehicleStatus } from "@shared/types";
+import type { Company, Condition, Damage, Driver, MediaItem, ProtocolType, Reservation, Vehicle, VehicleStatus } from "@shared/types";
 import { VEHICLE_STATUSES } from "@shared/types";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -273,9 +273,13 @@ export function LoanPage() {
   const minPhotos = me!.settings.min_photos_loan;
   const borrowerCompanies = companies.data?.results.filter((c) => c.company_type !== "supplier") ?? [];
   const driverList = (drivers.data?.results ?? []).filter((d) => !companyId || d.company_id === companyId || !d.company_id);
-  // Windows of other borrowers that this loan would run into.
   const until = returnAt && !Number.isNaN(new Date(returnAt).getTime()) ? fromLocalInputDateTime(returnAt) : nowIso;
-  const clashes = planned.filter((r) => r.id !== reservation?.id && r.starts_at < until && r.ends_at > nowIso);
+  const covers = (r: Reservation) => r.starts_at < until && r.ends_at > nowIso;
+  // Shortening the return date can leave the reservation outside the loan: then
+  // the hand-over is a different one and the plan has to stay open.
+  const fulfils = reservation && covers(reservation) ? reservation : null;
+  // Windows of other borrowers that this loan would run into.
+  const clashes = planned.filter((r) => r.id !== fulfils?.id && covers(r));
 
   function pickDriver(did: string) {
     setDriverId(did);
@@ -300,7 +304,7 @@ export function LoanPage() {
       notes,
       photo_ids: photos.map((p) => p.id),
       signature_id: signature?.id ?? null,
-      reservation_id: reservation?.id ?? null,
+      reservation_id: fulfils?.id ?? null,
       ignore_reservation: ignoreReservation,
     });
 
@@ -327,9 +331,14 @@ export function LoanPage() {
           content: (
             <Card>
               <div className="space-y-4">
-                {reservation && (
+                {fulfils && (
                   <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-                    {t("res.fulfils", { borrower: reservation.borrower_name, from: fmtDateTime(reservation.starts_at, lang), to: fmtDateTime(reservation.ends_at, lang) })}
+                    {t("res.fulfils", { borrower: fulfils.borrower_name, from: fmtDateTime(fulfils.starts_at, lang), to: fmtDateTime(fulfils.ends_at, lang) })}
+                  </p>
+                )}
+                {reservation && !fulfils && (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    {t("res.stays_open", { borrower: reservation.borrower_name, from: fmtDateTime(reservation.starts_at, lang), to: fmtDateTime(reservation.ends_at, lang) })}
                   </p>
                 )}
                 {clashes.length > 0 && (

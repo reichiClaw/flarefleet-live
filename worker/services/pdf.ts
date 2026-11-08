@@ -340,6 +340,23 @@ export async function generateProtocolPdf(env: Env, protocolId: string): Promise
   }
 }
 
+export const PDF_LINK_PREFIX = "pdf-link:";
+
+/** A protocol copy goes to borrowers and suppliers, so its link has to work for 30 days. */
+const DOWNLOAD_LINK_TTL = 30 * 24 * 3600;
+
+/**
+ * Capability URL for one protocol PDF. The recipients of a copy have no account,
+ * so neither the document page nor the protocol API would open for them; a token
+ * that stands for exactly this file is what makes the download work at all.
+ */
+async function pdfDownloadLink(env: Env, baseUrl: string, protocolId: string): Promise<string | null> {
+  if (!baseUrl) return null;
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
+  await env.KV.put(`${PDF_LINK_PREFIX}${token}`, protocolId, { expirationTtl: DOWNLOAD_LINK_TTL });
+  return `${baseUrl}/api/public/protocol-pdf/${token}`;
+}
+
 /** Runs after a protocol commit: render PDF, then e-mail a copy to the given recipients. */
 export async function finalizeProtocol(env: Env, protocolId: string, copyTo: string[]): Promise<void> {
   const ok = await generateProtocolPdf(env, protocolId);
@@ -358,19 +375,18 @@ export async function finalizeProtocol(env: Env, protocolId: string, copyTo: str
     // A protocol with many photos can outgrow the message limit; sending the
     // notification with a download link beats sending nothing at all.
     const attachable = bytes.byteLength <= MAX_ATTACHMENT_BYTES;
+    const link = attachable ? null : await pdfDownloadLink(env, settings.public_base_url, p.id);
+    const body = attachable
+      ? t(p.language, "email.protocol.body", { number: p.number, type: typeLabel, vehicle, notes: p.notes })
+      : link
+        ? t(p.language, "email.protocol.body_no_attachment", { number: p.number, type: typeLabel, vehicle, link, notes: p.notes })
+        : // Without a known public address there is nothing to link to.
+          t(p.language, "email.protocol.body_too_large", { number: p.number, type: typeLabel, vehicle, notes: p.notes });
     const sent = await sendEmailDetailed(
       env,
       copyTo,
       t(p.language, "email.protocol.subject", { org: settings.org_name, type: typeLabel, number: p.number, vehicle }),
-      attachable
-        ? t(p.language, "email.protocol.body", { number: p.number, type: typeLabel, vehicle, notes: p.notes })
-        : t(p.language, "email.protocol.body_no_attachment", {
-            number: p.number,
-            type: typeLabel,
-            vehicle,
-            link: `${settings.public_base_url}/documents/${p.id}`,
-            notes: p.notes,
-          }),
+      body,
       attachable ? [{ filename: `${p.number}.pdf`, type: "application/pdf", content: bytes }] : [],
     );
     await stmt(
@@ -383,7 +399,7 @@ export async function finalizeProtocol(env: Env, protocolId: string, copyTo: str
       "protocol",
       p.id,
       p.vehicle_id,
-      JSON.stringify(sent.ok ? { to: copyTo, attached: attachable } : { to: copyTo, error: sent.error }),
+      JSON.stringify(sent.ok ? { to: copyTo, attached: attachable, download_link: !!link } : { to: copyTo, error: sent.error }),
       new Date().toISOString(),
     ).run();
   } catch (err) {

@@ -345,9 +345,16 @@ export function loanCheckout(ctx: WorkflowCtx, vehicleId: string, input: LoanChe
     const planned = await overlapping(ctx.env, vehicleId, ts, input.expected_return_at);
     let reservation: ReservationRow | null = null;
     if (input.reservation_id) {
-      reservation = await getReservation(ctx.env, input.reservation_id);
-      if (reservation.vehicle_id !== v.id) throw badRequest("invalid_reference", { reservation_id: "not_found" });
-      if (reservation.status !== "planned") throw conflict("reservation_closed", { status: reservation.status });
+      // Only a window this loan really covers may be closed by it, otherwise a
+      // shortened return date would consume next week's booking.
+      reservation = planned.find((r) => r.id === input.reservation_id) ?? null;
+      if (!reservation) {
+        const named = await getReservation(ctx.env, input.reservation_id);
+        if (named.vehicle_id !== v.id) throw badRequest("invalid_reference", { reservation_id: "not_found" });
+        if (named.status !== "planned") throw conflict("reservation_closed", { status: named.status });
+        const w = formatWindow(named, ctx.lang);
+        throw conflict("reservation_window", { from: w.from, to: w.to });
+      }
     } else {
       reservation = planned.find((r) => r.starts_at <= ts) ?? null;
     }
