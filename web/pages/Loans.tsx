@@ -1,9 +1,9 @@
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Loan, Paginated } from "@shared/types";
 import { api, qs } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { EmptyState, ErrorBox, Loading, PageHeader, Pagination, SegmentedControl } from "../components/ui";
+import { Button, EmptyState, ErrorBox, Loading, PageHeader, Pagination, SegmentedControl } from "../components/ui";
 import { LoanRow } from "./Dashboard";
 
 export function LoansPage() {
@@ -18,7 +18,17 @@ export function LoansPage() {
   });
   return (
     <div>
-      <PageHeader title={t("loans.title")} subtitle={q.data ? t("common.results", { count: q.data.count }) : undefined} />
+      <PageHeader
+        title={t("loans.title")}
+        subtitle={q.data ? t("common.results", { count: q.data.count }) : undefined}
+        action={
+          <Link to="/reservations">
+            <Button size="sm" variant="secondary">
+              {t("res.title")}
+            </Button>
+          </Link>
+        }
+      />
       <SegmentedControl
         value={status}
         onChange={(v) => setParams({ status: v })}

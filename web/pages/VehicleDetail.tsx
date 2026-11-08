@@ -9,8 +9,9 @@ import { fmtDate, fmtDateTime, fmtNum } from "../lib/format";
 import { Badge, Button, Card, EmptyState, ErrorBox, Field, Input, KeyValue, Loading, Modal, PageHeader, Select, StatusBadge, Textarea, Toggle, cx, errorMessage, useToast } from "../components/ui";
 import { PhotoCapture } from "../components/PhotoCapture";
 import { ProtocolCard } from "./Documents";
+import { ReserveModal, VehicleReservations, useVehicleReservations } from "./Reservations";
 
-type Tab = "overview" | "history" | "damages" | "photos" | "loans";
+type Tab = "overview" | "history" | "damages" | "photos" | "loans" | "reservations";
 
 export function useVehicle(id: string | undefined) {
   return useQuery<Vehicle>({ queryKey: ["vehicle", id], queryFn: () => api.get(`/api/vehicles/${id}`), enabled: !!id });
@@ -21,6 +22,7 @@ export function invalidateVehicle(qc: ReturnType<typeof useQueryClient>, id: str
   qc.invalidateQueries({ queryKey: ["vehicle-timeline", id] });
   qc.invalidateQueries({ queryKey: ["vehicle-damages", id] });
   qc.invalidateQueries({ queryKey: ["vehicle-loans", id] });
+  qc.invalidateQueries({ queryKey: ["vehicle-reservations", id] });
   qc.invalidateQueries({ queryKey: ["vehicles"] });
   qc.invalidateQueries({ queryKey: ["dashboard"] });
   qc.invalidateQueries({ queryKey: ["protocols"] });
@@ -35,11 +37,13 @@ export function VehicleDetailPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab) || "overview";
   const q = useVehicle(id);
+  const reservations = useVehicleReservations(id);
   const [qrOpen, setQrOpen] = useState(false);
   const [damageOpen, setDamageOpen] = useState(false);
   const [resolveDamage, setResolveDamage] = useState<Damage | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
+  const [reserveOpen, setReserveOpen] = useState(false);
   const unarchive = useMutation({
     mutationFn: () => api.post(`/api/vehicles/${id}/unarchive`),
     onSuccess: () => invalidateVehicle(qc, id!),
@@ -50,6 +54,7 @@ export function VehicleDetailPage() {
   if (q.error || !q.data) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const v = q.data;
   const cap = v.capabilities;
+  const planned = reservations.data?.results ?? [];
 
   const primaryActions = [
     cap.check_in && { to: `/vehicles/${v.id}/check-in`, label: t("action.check_in"), desc: t("action.check_in_desc"), tone: "bg-sky-600" },
@@ -61,6 +66,7 @@ export function VehicleDetailPage() {
   const secondaryActions = [
     cap.maintenance_start && { to: `/vehicles/${v.id}/maintenance/start`, label: t("action.maintenance_start") },
     cap.maintenance_end && { to: `/vehicles/${v.id}/maintenance/end`, label: t("action.maintenance_end") },
+    cap.reserve && { onClick: () => setReserveOpen(true), label: t("res.new") },
     cap.report_damage && { onClick: () => setDamageOpen(true), label: t("action.report_damage") },
     cap.edit && { to: `/vehicles/${v.id}/edit`, label: t("action.edit") },
     cap.correct && { to: `/vehicles/${v.id}/correct`, label: t("action.correct") },
@@ -75,6 +81,7 @@ export function VehicleDetailPage() {
     { key: "damages", label: `${t("vehicle.tab.damages")}${v.open_damage_count ? ` (${v.open_damage_count})` : ""}` },
     { key: "photos", label: t("vehicle.tab.photos") },
     { key: "loans", label: t("vehicle.tab.loans") },
+    { key: "reservations", label: `${t("res.title")}${planned.length ? ` (${planned.length})` : ""}` },
   ];
 
   return (
@@ -113,6 +120,15 @@ export function VehicleDetailPage() {
             </a>
           )}
         </div>
+      )}
+
+      {planned.length > 0 && (
+        <button type="button" onClick={() => setParams({ tab: "reservations" })} className="mb-4 block w-full rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-left text-sm">
+          <div className="font-semibold text-blue-900">{t("res.vehicle_reserved", { count: planned.length })}</div>
+          <div className="text-blue-800">
+            {planned[0].borrower_name} · {fmtDateTime(planned[0].starts_at, lang)} → {fmtDateTime(planned[0].ends_at, lang)}
+          </div>
+        </button>
       )}
 
       {primaryActions.length > 0 && (
@@ -160,12 +176,14 @@ export function VehicleDetailPage() {
       {tab === "damages" && <Damages id={v.id} canResolve={cap.resolve_damage} onResolve={setResolveDamage} />}
       {tab === "photos" && <Photos id={v.id} />}
       {tab === "loans" && <Loans id={v.id} />}
+      {tab === "reservations" && <VehicleReservations vehicleId={v.id} canReserve={cap.reserve} />}
 
       <QrModal v={v} open={qrOpen} onClose={() => setQrOpen(false)} />
       <ReportDamageModal v={v} open={damageOpen} onClose={() => setDamageOpen(false)} />
       <ResolveDamageModal v={v} damage={resolveDamage} onClose={() => setResolveDamage(null)} />
       <ArchiveModal v={v} open={archiveOpen} onClose={() => setArchiveOpen(false)} />
       <ReturnDueModal v={v} open={dueOpen} onClose={() => setDueOpen(false)} />
+      <ReserveModal open={reserveOpen} onClose={() => setReserveOpen(false)} vehicle={v} />
     </div>
   );
 }

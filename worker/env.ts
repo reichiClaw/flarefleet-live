@@ -8,7 +8,7 @@ export interface SendEmailBinding {
     html?: string;
     text?: string;
     replyTo?: string;
-    attachments?: { content: string; filename: string; type: string; disposition?: string }[];
+    attachments?: { content: string | ArrayBuffer | ArrayBufferView; filename: string; type: string; disposition?: "attachment" | "inline" }[];
   }): Promise<{ messageId?: string }>;
 }
 

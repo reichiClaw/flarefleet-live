@@ -72,6 +72,7 @@ export function AppLayout() {
     { to: "/documents", label: t("nav.documents"), icon: Icon.doc },
   ];
   const secondary = [
+    { to: "/reservations", label: t("nav.reservations") },
     can("admin") && { to: "/import", label: t("nav.import") },
     { to: "/partners", label: t("nav.partners") },
     can("admin") && { to: "/categories", label: t("nav.categories") },

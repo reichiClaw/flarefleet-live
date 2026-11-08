@@ -13,6 +13,7 @@ import { VehicleDetailPage } from "./pages/VehicleDetail";
 import { CheckInPage, CheckOutPage, CorrectionPage, LoanPage, MaintenanceEndPage, MaintenanceStartPage, ReturnPage } from "./pages/workflows";
 import { DocumentsPage, ProtocolDetailPage } from "./pages/Documents";
 import { LoansPage } from "./pages/Loans";
+import { ReservationsPage } from "./pages/Reservations";
 import { PublicQrPage, ScanPage } from "./pages/Scan";
 import { ImportPage } from "./pages/Import";
 import { PartnersPage } from "./pages/Partners";
@@ -72,6 +73,7 @@ export function App() {
             <Route path="/vehicles/:id/correct" element={<RequireAuth min="admin"><CorrectionPage /></RequireAuth>} />
             <Route path="/scan" element={<ScanPage />} />
             <Route path="/loans" element={<LoansPage />} />
+            <Route path="/reservations" element={<ReservationsPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/documents/:id" element={<ProtocolDetailPage />} />
             <Route path="/import" element={<RequireAuth min="admin"><ImportPage /></RequireAuth>} />

@@ -4,10 +4,13 @@ import { loadSettings, settingsLanguage } from "./lib/settings";
 import { sendEmail } from "./lib/email";
 import { t } from "./lib/i18n";
 import { generateProtocolPdf } from "./services/pdf";
+import { expireReservations } from "./services/reservations";
 import type { MediaRow } from "./services/media";
 
-/** Hourly: retry failed/pending PDFs, purge stale staged uploads. */
+/** Hourly: retry failed/pending PDFs, purge stale staged uploads, close passed reservations. */
 export async function hourly(env: Env): Promise<void> {
+  await expireReservations(env);
+
   const pending = await all<{ id: string }>(
     env.DB,
     "SELECT id FROM protocols WHERE pdf_status IN ('pending','failed') AND pdf_attempts < 5 ORDER BY created_at LIMIT 20",

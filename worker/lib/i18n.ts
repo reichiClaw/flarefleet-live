@@ -24,8 +24,6 @@ const de: Dict = {
   "errors.active_loan": "Das Fahrzeug ist noch verliehen.",
   "errors.no_active_loan": "Für dieses Fahrzeug gibt es keine aktive Ausleihe.",
   "errors.loan_not_active": "Diese Ausleihe ist nicht mehr aktiv.",
-  "errors.odometer_required": "Kilometerstand ist für diese Kategorie erforderlich.",
-  "errors.hours_required": "Betriebsstunden sind für diese Kategorie erforderlich.",
   "errors.odometer_not_applicable": "Diese Kategorie hat keinen Kilometerzähler.",
   "errors.hours_not_applicable": "Diese Kategorie hat keinen Betriebsstundenzähler.",
   "errors.reading_decreased": "Der Zählerstand darf nicht kleiner sein als der letzte Stand ({previous}).",
@@ -55,6 +53,10 @@ const de: Dict = {
   "errors.duplicate_name": "Dieser Name ist bereits vergeben.",
   "errors.damage_not_open": "Ein ausgewählter Schaden ist nicht (mehr) offen. Bitte Seite neu laden.",
   "errors.vehicle_busy": "Das Fahrzeug wird gerade bearbeitet. Bitte in einem Moment erneut versuchen.",
+  "errors.reservation_overlap": "Für diesen Zeitraum ist das Fahrzeug bereits vorreserviert ({borrower}, {from} – {to}).",
+  "errors.reservation_conflict": "Das Fahrzeug ist für diesen Zeitraum vorreserviert ({borrower}, {from} – {to}).",
+  "errors.reservation_past": "Das Ende der Vorreservierung liegt in der Vergangenheit.",
+  "errors.reservation_closed": "Diese Vorreservierung ist nicht mehr offen ({status}).",
   "errors.cannot_delete_self": "Das eigene Konto kann nicht gelöscht werden.",
   "errors.user_deleted": "Dieses Konto wurde gelöscht.",
   "errors.internal": "Unerwarteter Fehler. Bitte erneut versuchen.",
@@ -129,6 +131,7 @@ const de: Dict = {
   "email.overdue.intro": "Folgende Ausleihen sind überfällig:",
   "email.protocol.subject": "{org}: {type} {number} – {vehicle}",
   "email.protocol.body": "Im Anhang finden Sie das Protokoll {number} ({type}) für {vehicle}.\n\n{notes}",
+  "email.protocol.body_no_attachment": "Das Protokoll {number} ({type}) für {vehicle} wurde erstellt. Es ist zu groß für den E-Mail-Anhang und steht hier zum Abruf bereit:\n{link}\n\n{notes}",
 };
 
 const en: Dict = {
@@ -152,8 +155,6 @@ const en: Dict = {
   "errors.active_loan": "The vehicle is still on loan.",
   "errors.no_active_loan": "This vehicle has no active loan.",
   "errors.loan_not_active": "This loan is no longer active.",
-  "errors.odometer_required": "An odometer reading is required for this category.",
-  "errors.hours_required": "Operating hours are required for this category.",
   "errors.odometer_not_applicable": "This category has no odometer.",
   "errors.hours_not_applicable": "This category has no hour meter.",
   "errors.reading_decreased": "The reading must not be lower than the last reading ({previous}).",
@@ -183,6 +184,10 @@ const en: Dict = {
   "errors.duplicate_name": "This name is already in use.",
   "errors.damage_not_open": "One of the selected damages is no longer open. Please reload the page.",
   "errors.vehicle_busy": "This vehicle is being processed right now. Please try again in a moment.",
+  "errors.reservation_overlap": "The vehicle is already reserved for this period ({borrower}, {from} – {to}).",
+  "errors.reservation_conflict": "The vehicle is reserved for this period ({borrower}, {from} – {to}).",
+  "errors.reservation_past": "The end of the reservation is in the past.",
+  "errors.reservation_closed": "This reservation is no longer open ({status}).",
   "errors.cannot_delete_self": "You cannot delete your own account.",
   "errors.user_deleted": "This account has been deleted.",
   "errors.internal": "Unexpected error. Please try again.",
@@ -254,6 +259,7 @@ const en: Dict = {
   "email.overdue.intro": "The following loans are overdue:",
   "email.protocol.subject": "{org}: {type} {number} – {vehicle}",
   "email.protocol.body": "Attached is protocol {number} ({type}) for {vehicle}.\n\n{notes}",
+  "email.protocol.body_no_attachment": "Protocol {number} ({type}) for {vehicle} has been created. It is too large to attach and can be downloaded here:\n{link}\n\n{notes}",
 };
 
 const dicts: Record<Language, Dict> = { de, en };

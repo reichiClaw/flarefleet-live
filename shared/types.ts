@@ -127,6 +127,32 @@ export interface Loan {
   vehicle?: VehicleSummary;
 }
 
+export type ReservationStatus = "planned" | "fulfilled" | "cancelled" | "expired";
+
+/** A planned loan window. Becomes a loan at checkout, or expires unused. */
+export interface Reservation {
+  id: string;
+  vehicle_id: string;
+  company_id: string | null;
+  company_name?: string | null;
+  driver_id: string | null;
+  borrower_name: string;
+  borrower_phone: string;
+  borrower_email: string;
+  starts_at: string;
+  ends_at: string;
+  notes: string;
+  status: ReservationStatus;
+  loan_id: string | null;
+  created_by: string;
+  created_by_name?: string | null;
+  close_reason: string;
+  created_at: string;
+  /** Planned and its window contains now, so it is due for checkout. */
+  due?: boolean;
+  vehicle?: VehicleSummary;
+}
+
 export interface VehicleSummary {
   id: string;
   internal_number: string;
@@ -173,6 +199,7 @@ export interface VehicleCapabilities {
   unarchive: boolean;
   correct: boolean;
   edit: boolean;
+  reserve: boolean;
 }
 
 export interface Damage {
@@ -271,6 +298,7 @@ export interface DashboardSummary {
   due_soon: Loan[];
   attention: (VehicleSummary & { open_damage_count: number })[];
   return_due: (VehicleSummary & { return_due: string | null })[];
+  reservations: Reservation[];
   recent: AuditEntry[];
 }
 

@@ -4,7 +4,7 @@ import type { Env } from "../env";
 import { one, stmt } from "../lib/db";
 import { t } from "../lib/i18n";
 import { loadSettings } from "../lib/settings";
-import { sendEmailDetailed } from "../lib/email";
+import { MAX_ATTACHMENT_BYTES, sendEmailDetailed } from "../lib/email";
 import { storeGenerated, type MediaRow } from "./media";
 
 interface ProtocolRow {
@@ -355,12 +355,23 @@ export async function finalizeProtocol(env: Env, protocolId: string, copyTo: str
     const settings = await loadSettings(env);
     const vehicle = `${snap.vehicle.internal_number} ${snap.vehicle.manufacturer} ${snap.vehicle.model}`;
     const typeLabel = t(p.language, `protocol.${p.type}`);
+    // A protocol with many photos can outgrow the message limit; sending the
+    // notification with a download link beats sending nothing at all.
+    const attachable = bytes.byteLength <= MAX_ATTACHMENT_BYTES;
     const sent = await sendEmailDetailed(
       env,
       copyTo,
       t(p.language, "email.protocol.subject", { org: settings.org_name, type: typeLabel, number: p.number, vehicle }),
-      t(p.language, "email.protocol.body", { number: p.number, type: typeLabel, vehicle, notes: p.notes }),
-      [{ filename: `${p.number}.pdf`, type: "application/pdf", content: bytes }],
+      attachable
+        ? t(p.language, "email.protocol.body", { number: p.number, type: typeLabel, vehicle, notes: p.notes })
+        : t(p.language, "email.protocol.body_no_attachment", {
+            number: p.number,
+            type: typeLabel,
+            vehicle,
+            link: `${settings.public_base_url}/documents/${p.id}`,
+            notes: p.notes,
+          }),
+      attachable ? [{ filename: `${p.number}.pdf`, type: "application/pdf", content: bytes }] : [],
     );
     await stmt(
       env.DB,
@@ -372,7 +383,7 @@ export async function finalizeProtocol(env: Env, protocolId: string, copyTo: str
       "protocol",
       p.id,
       p.vehicle_id,
-      JSON.stringify(sent.ok ? { to: copyTo } : { to: copyTo, error: sent.error }),
+      JSON.stringify(sent.ok ? { to: copyTo, attached: attachable } : { to: copyTo, error: sent.error }),
       new Date().toISOString(),
     ).run();
   } catch (err) {

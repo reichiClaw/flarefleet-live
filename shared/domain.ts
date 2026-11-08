@@ -46,6 +46,9 @@ export function vehicleCapabilities(role: Role, v: VehicleStateForCaps): Vehicle
     unarchive: admin && s === "archived",
     correct: admin && s !== "archived",
     edit: admin && s !== "archived",
+    // A vehicle still to be delivered or currently on loan can be planned for
+    // later; one that has left the fleet cannot.
+    reserve: s !== "checked_out" && s !== "archived",
   };
 }
 

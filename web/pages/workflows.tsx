@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Company, Condition, Damage, Driver, MediaItem, ProtocolType, Vehicle, VehicleStatus } from "@shared/types";
 import { VEHICLE_STATUSES } from "@shared/types";
@@ -12,6 +12,7 @@ import { PhotoCapture } from "../components/PhotoCapture";
 import { SignaturePad } from "../components/SignaturePad";
 import { ConditionPicker, DamagesEditor, ReadingsFields, StatusPreview, SummaryList, Wizard, readingsToPayload, validateReadings, type DamageDraft, type ReadingsState } from "../components/Wizard";
 import { invalidateVehicle, useVehicle } from "./VehicleDetail";
+import { useVehicleReservations } from "./Reservations";
 
 interface WorkflowResult {
   vehicle: Vehicle;
@@ -128,7 +129,7 @@ export function CheckInPage() {
         {
           key: "details",
           title: t("wf.step_details"),
-          validate: () => validateReadings(readings, v, false, t),
+          validate: () => validateReadings(readings, v, t),
           content: (
             <Card>
               <div className="space-y-4">
@@ -230,10 +231,12 @@ export function LoanPage() {
   const { t, lang } = useT();
   const { me } = useAuth();
   const { id } = useParams();
+  const [search] = useSearchParams();
   const q = useVehicle(id);
   const wf = useWorkflow(id, "loan", "loan_checkout");
   const companies = useQuery<{ results: Company[] }>({ queryKey: ["companies", "borrowers"], queryFn: () => api.get("/api/companies") });
   const drivers = useQuery<{ results: Driver[] }>({ queryKey: ["drivers"], queryFn: () => api.get("/api/drivers") });
+  const reservations = useVehicleReservations(id);
   const [readings, setReadings] = useState<ReadingsState>({ odometer_km: "", operating_hours: "" });
   const [companyId, setCompanyId] = useState("");
   const [driverId, setDriverId] = useState("");
@@ -244,6 +247,24 @@ export function LoanPage() {
   const [photos, setPhotos] = useState<MediaItem[]>([]);
   const [notes, setNotes] = useState("");
   const [signature, setSignature] = useState<MediaItem | null>(null);
+  const [ignoreReservation, setIgnoreReservation] = useState(false);
+
+  const planned = reservations.data?.results ?? [];
+  const nowIso = new Date().toISOString();
+  const fromParam = search.get("reservation");
+  // Either the reservation the user came from, or the one whose window is open right now.
+  const reservation = planned.find((r) => r.id === fromParam) ?? planned.find((r) => r.starts_at <= nowIso && r.ends_at >= nowIso) ?? null;
+
+  // The reservation's borrower is filled in once and stays editable afterwards.
+  useEffect(() => {
+    if (!reservation) return;
+    setName(reservation.borrower_name);
+    setPhone(reservation.borrower_phone);
+    setEmail(reservation.borrower_email);
+    if (reservation.company_id) setCompanyId(reservation.company_id);
+    if (reservation.driver_id) setDriverId(reservation.driver_id);
+    if (new Date(reservation.ends_at).getTime() > Date.now()) setReturnAt(toLocalInputDateTime(reservation.ends_at));
+  }, [reservation?.id]);
 
   if (q.isLoading) return <Loading />;
   if (q.error || !q.data) return <ErrorBox error={q.error} />;
@@ -252,6 +273,9 @@ export function LoanPage() {
   const minPhotos = me!.settings.min_photos_loan;
   const borrowerCompanies = companies.data?.results.filter((c) => c.company_type !== "supplier") ?? [];
   const driverList = (drivers.data?.results ?? []).filter((d) => !companyId || d.company_id === companyId || !d.company_id);
+  // Windows of other borrowers that this loan would run into.
+  const until = returnAt && !Number.isNaN(new Date(returnAt).getTime()) ? fromLocalInputDateTime(returnAt) : nowIso;
+  const clashes = planned.filter((r) => r.id !== reservation?.id && r.starts_at < until && r.ends_at > nowIso);
 
   function pickDriver(did: string) {
     setDriverId(did);
@@ -276,6 +300,8 @@ export function LoanPage() {
       notes,
       photo_ids: photos.map((p) => p.id),
       signature_id: signature?.id ?? null,
+      reservation_id: reservation?.id ?? null,
+      ignore_reservation: ignoreReservation,
     });
 
   const quickDays = [1, 3, 7, 14, 30];
@@ -293,11 +319,27 @@ export function LoanPage() {
           validate: () => {
             if (!name.trim()) return `${t("wf.borrower_name")}: ${t("common.required")}`;
             if (!returnAt || new Date(returnAt).getTime() <= Date.now()) return t("wf.expected_return_at");
-            return validateReadings(readings, v, true, t);
+            if (clashes.length && !ignoreReservation) {
+              return t("res.conflict", { borrower: clashes[0].borrower_name, from: fmtDateTime(clashes[0].starts_at, lang), to: fmtDateTime(clashes[0].ends_at, lang) });
+            }
+            return validateReadings(readings, v, t);
           },
           content: (
             <Card>
               <div className="space-y-4">
+                {reservation && (
+                  <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                    {t("res.fulfils", { borrower: reservation.borrower_name, from: fmtDateTime(reservation.starts_at, lang), to: fmtDateTime(reservation.ends_at, lang) })}
+                  </p>
+                )}
+                {clashes.length > 0 && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <p>{t("res.conflict", { borrower: clashes[0].borrower_name, from: fmtDateTime(clashes[0].starts_at, lang), to: fmtDateTime(clashes[0].ends_at, lang) })}</p>
+                    <div className="mt-2">
+                      <Toggle checked={ignoreReservation} onChange={setIgnoreReservation} label={t("res.ignore")} />
+                    </div>
+                  </div>
+                )}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label={t("wf.borrower_company")}>
                     <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
@@ -342,7 +384,7 @@ export function LoanPage() {
                     ))}
                   </div>
                 </div>
-                <ReadingsFields vehicle={v} value={readings} onChange={setReadings} required />
+                <ReadingsFields vehicle={v} value={readings} onChange={setReadings} />
               </div>
             </Card>
           ),
@@ -440,7 +482,7 @@ export function ReturnPage() {
         {
           key: "details",
           title: t("wf.step_details"),
-          validate: () => validateReadings(readings, v, true, t),
+          validate: () => validateReadings(readings, v, t),
           content: (
             <Card>
               {loan && (
@@ -464,7 +506,7 @@ export function ReturnPage() {
                   )}
                 </div>
               )}
-              <ReadingsFields vehicle={v} value={readings} onChange={setReadings} required />
+              <ReadingsFields vehicle={v} value={readings} onChange={setReadings} />
             </Card>
           ),
         },
@@ -586,7 +628,7 @@ export function CheckOutPage() {
         {
           key: "details",
           title: t("wf.step_details"),
-          validate: () => validateReadings(readings, v, true, t),
+          validate: () => validateReadings(readings, v, t),
           content: (
             <Card>
               <div className="space-y-4">
@@ -605,7 +647,7 @@ export function CheckOutPage() {
                     <Input value={recipient} onChange={(e) => setRecipient(e.target.value)} />
                   </Field>
                 </div>
-                <ReadingsFields vehicle={v} value={readings} onChange={setReadings} required />
+                <ReadingsFields vehicle={v} value={readings} onChange={setReadings} />
                 <Toggle checked={archive} onChange={setArchive} label={t("wf.archive_after_checkout")} />
               </div>
             </Card>
@@ -703,7 +745,7 @@ export function MaintenanceStartPage() {
         {
           key: "details",
           title: t("wf.step_details"),
-          validate: () => (!reason.trim() ? `${t("wf.reason")}: ${t("common.required")}` : validateReadings(readings, v, false, t)),
+          validate: () => (!reason.trim() ? `${t("wf.reason")}: ${t("common.required")}` : validateReadings(readings, v, t)),
           content: (
             <Card>
               <div className="space-y-4">
@@ -753,7 +795,7 @@ export function MaintenanceEndPage() {
         {
           key: "details",
           title: t("wf.step_details"),
-          validate: () => validateReadings(readings, v, false, t),
+          validate: () => validateReadings(readings, v, t),
           content: (
             <Card>
               <div className="space-y-4">

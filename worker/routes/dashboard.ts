@@ -5,6 +5,7 @@ import { requireAuth } from "../lib/auth";
 import { all, json, now, paginate, parsePage } from "../lib/db";
 import { hasRole } from "@shared/types";
 import { VEHICLE_SELECT, toLoan, toSummary, type LoanRow, type VehicleRow } from "../services/vehicles";
+import { upcomingReservations } from "../services/reservations";
 
 const LOAN_STATUSES = new Set(["active", "returned", "cancelled", "all"]);
 
@@ -51,12 +52,13 @@ dashboard.get("/summary", async (c) => {
   const counts = { announced: 0, available: 0, loaned: 0, damaged: 0, maintenance: 0, checked_out: 0, archived: 0 } as Record<VehicleStatus, number>;
   for (const r of countRows) counts[r.status] = r.c;
 
-  const [overdueLoans, dueSoon, arrivals, attention, returnDue, recentAudit, openDamages, failedPdfs] = await Promise.all([
+  const [overdueLoans, dueSoon, arrivals, attention, returnDue, reservations, recentAudit, openDamages, failedPdfs] = await Promise.all([
     all<LoanWithVehicleRow>(db, `${LOAN_WITH_VEHICLE} WHERE l.status = 'active' AND l.expected_return_at < ? ORDER BY l.expected_return_at LIMIT 20`, ts),
     all<LoanWithVehicleRow>(db, `${LOAN_WITH_VEHICLE} WHERE l.status = 'active' AND l.expected_return_at >= ? AND l.expected_return_at <= ? ORDER BY l.expected_return_at LIMIT 20`, ts, soon),
     all<VehicleRow>(db, `${VEHICLE_SELECT} WHERE v.status = 'announced' ORDER BY v.expected_arrival IS NULL, v.expected_arrival, v.created_at LIMIT 20`),
     all<VehicleRow>(db, `${VEHICLE_SELECT} WHERE v.status IN ('damaged','maintenance') ORDER BY v.updated_at DESC LIMIT 20`),
     all<VehicleRow>(db, `${VEHICLE_SELECT} WHERE v.return_due IS NOT NULL AND v.return_due <= ? AND v.status NOT IN ('checked_out','archived') ORDER BY v.return_due LIMIT 20`, weekAhead),
+    upcomingReservations(c.env),
     showRecent
       ? all<Record<string, unknown>>(
           db,
@@ -79,6 +81,7 @@ dashboard.get("/summary", async (c) => {
     due_soon: dueSoon.map(withVehicle),
     attention: attention.map((v) => ({ ...toSummary(v), open_damage_count: Number(v.open_damage_count) })),
     return_due: returnDue.map((v) => ({ ...toSummary(v), return_due: v.return_due })),
+    reservations,
     recent: recentAudit.map((a) => ({ ...(a as unknown as AuditEntry), details: json(a.details, null) })),
   };
   return c.json(summary);

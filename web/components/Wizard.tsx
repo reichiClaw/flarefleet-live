@@ -101,24 +101,23 @@ export function readingsToPayload(r: ReadingsState, mode: MeterMode) {
   };
 }
 
-export function validateReadings(r: ReadingsState, vehicle: Vehicle, required: boolean, t: (k: string, p?: Record<string, string | number>) => string): string | null {
+/** Readings are optional in every workflow; only unreadable or backwards values are rejected. */
+export function validateReadings(r: ReadingsState, vehicle: Vehicle, t: (k: string, p?: Record<string, string | number>) => string): string | null {
   const req = meterRequirements(vehicle.meter_mode);
   if (req.odometer) {
     const odo = readingNumber(r.odometer_km);
-    if (required && odo == null) return `${t("vehicle.odometer")}: ${t("common.required")}`;
     if (r.odometer_km.trim() !== "" && odo == null) return `${t("vehicle.odometer")}: ${t("common.invalid_number")}`;
     if (odo != null && vehicle.odometer_km != null && odo < vehicle.odometer_km) return `${t("vehicle.odometer")} < ${vehicle.odometer_km}`;
   }
   if (req.hours) {
     const hours = readingNumber(r.operating_hours);
-    if (required && hours == null) return `${t("vehicle.hours")}: ${t("common.required")}`;
     if (r.operating_hours.trim() !== "" && hours == null) return `${t("vehicle.hours")}: ${t("common.invalid_number")}`;
     if (hours != null && vehicle.operating_hours != null && hours < vehicle.operating_hours) return `${t("vehicle.hours")} < ${vehicle.operating_hours}`;
   }
   return null;
 }
 
-export function ReadingsFields({ vehicle, value, onChange, required }: { vehicle: Vehicle; value: ReadingsState; onChange: (v: ReadingsState) => void; required?: boolean }) {
+export function ReadingsFields({ vehicle, value, onChange }: { vehicle: Vehicle; value: ReadingsState; onChange: (v: ReadingsState) => void }) {
   const { t, lang } = useT();
   const req = meterRequirements(vehicle.meter_mode);
   if (!req.odometer && !req.hours) return null;
@@ -127,12 +126,12 @@ export function ReadingsFields({ vehicle, value, onChange, required }: { vehicle
       <h3 className="mb-2 text-sm font-semibold text-slate-800">{t("wf.readings")}</h3>
       <div className="grid grid-cols-2 gap-3">
         {req.odometer && (
-          <Field label={`${t("vehicle.odometer")} (${t("wf.km")})`} required={required} hint={vehicle.odometer_km != null ? t("wf.reading_previous", { value: fmtNum(vehicle.odometer_km, lang, "km") }) : undefined}>
+          <Field label={`${t("vehicle.odometer")} (${t("wf.km")})`} hint={vehicle.odometer_km != null ? t("wf.reading_previous", { value: fmtNum(vehicle.odometer_km, lang, "km") }) : t("wf.reading_optional")}>
             <Input type="number" inputMode="numeric" min={vehicle.odometer_km ?? 0} value={value.odometer_km} onChange={(e) => onChange({ ...value, odometer_km: e.target.value })} placeholder={vehicle.odometer_km != null ? String(vehicle.odometer_km) : "0"} />
           </Field>
         )}
         {req.hours && (
-          <Field label={`${t("vehicle.hours")} (${t("wf.h")})`} required={required} hint={vehicle.operating_hours != null ? t("wf.reading_previous", { value: fmtNum(vehicle.operating_hours, lang, "h") }) : undefined}>
+          <Field label={`${t("vehicle.hours")} (${t("wf.h")})`} hint={vehicle.operating_hours != null ? t("wf.reading_previous", { value: fmtNum(vehicle.operating_hours, lang, "h") }) : t("wf.reading_optional")}>
             <Input type="number" inputMode="decimal" step="0.1" min={vehicle.operating_hours ?? 0} value={value.operating_hours} onChange={(e) => onChange({ ...value, operating_hours: e.target.value })} placeholder={vehicle.operating_hours != null ? String(vehicle.operating_hours) : "0"} />
           </Field>
         )}

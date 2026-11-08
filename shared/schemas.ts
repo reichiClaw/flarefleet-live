@@ -131,7 +131,27 @@ export const LoanCheckoutSchema = z.object({
   borrower_phone: optionalTrimmed(60),
   borrower_email: z.string().trim().max(200).default(""),
   expected_return_at: isoDate,
+  /** Pre-reservation this checkout fulfils; detected from the window when omitted. */
+  reservation_id: optionalId,
+  /** Loan the vehicle even though someone else reserved part of the window. */
+  ignore_reservation: z.boolean().default(false),
 });
+
+export const ReservationCreateSchema = z
+  .object({
+    vehicle_id: z.string().uuid(),
+    company_id: optionalId,
+    driver_id: optionalId,
+    borrower_name: trimmed(120).min(1),
+    borrower_phone: optionalTrimmed(60),
+    borrower_email: z.string().trim().max(200).default(""),
+    starts_at: isoDate,
+    ends_at: isoDate,
+    notes: optionalTrimmed(2000),
+  })
+  .refine((v) => new Date(v.ends_at) > new Date(v.starts_at), { message: "end_before_start", path: ["ends_at"] });
+
+export const ReservationCancelSchema = z.object({ reason: optionalTrimmed(500) });
 
 export const LoanReturnSchema = z.object({
   ...workflowBase,
@@ -212,6 +232,7 @@ export type VehicleCreateInput = z.infer<typeof VehicleCreateSchema>;
 export type VehicleUpdateInput = z.infer<typeof VehicleUpdateSchema>;
 export type CheckInInput = z.infer<typeof CheckInSchema>;
 export type LoanCheckoutInput = z.infer<typeof LoanCheckoutSchema>;
+export type ReservationCreateInput = z.infer<typeof ReservationCreateSchema>;
 export type LoanReturnInput = z.infer<typeof LoanReturnSchema>;
 export type CheckOutInput = z.infer<typeof CheckOutSchema>;
 export type MaintenanceStartInput = z.infer<typeof MaintenanceStartSchema>;

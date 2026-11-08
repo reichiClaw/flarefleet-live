@@ -19,6 +19,7 @@ import { attachStatements, loadStaged, type MediaRow } from "./media";
 import { getActiveLoan, getVehicle, getVehicleRow, type LoanRow, type VehicleRow } from "./vehicles";
 import { withVehicleLock } from "./lock";
 import { finalizeProtocol } from "./pdf";
+import { formatWindow, fulfilStatement, getReservation, overlapping, type ReservationRow } from "./reservations";
 
 export interface WorkflowCtx {
   env: Env;
@@ -47,21 +48,22 @@ interface Readings {
   operating_hours: number | null;
 }
 
-function validateReadings(v: VehicleRow, input: { odometer_km?: number | null; operating_hours?: number | null }, required: boolean): Readings {
+/**
+ * Meter readings are documentation, not a precondition: a workflow must never be
+ * blocked because nobody could read the dashboard. Only impossible values are
+ * refused — a meter the category does not have, or a reading that went backwards.
+ */
+function validateReadings(v: VehicleRow, input: { odometer_km?: number | null; operating_hours?: number | null }): Readings {
   const req = meterRequirements(v.meter_mode);
   const odo = input.odometer_km ?? null;
   const hrs = input.operating_hours ?? null;
   if (!req.odometer) {
     if (odo != null) throw badRequest("odometer_not_applicable", { odometer_km: "not_applicable" });
-  } else if (required && odo == null) {
-    throw badRequest("odometer_required", { odometer_km: "required" });
   } else if (odo != null && v.odometer_km != null && odo < v.odometer_km) {
     throw badRequest("reading_decreased", { odometer_km: "decreased" }, { previous: v.odometer_km });
   }
   if (!req.hours) {
     if (hrs != null) throw badRequest("hours_not_applicable", { operating_hours: "not_applicable" });
-  } else if (required && hrs == null) {
-    throw badRequest("hours_required", { operating_hours: "required" });
   } else if (hrs != null && v.operating_hours != null && hrs < v.operating_hours) {
     throw badRequest("reading_decreased", { operating_hours: "decreased" }, { previous: v.operating_hours });
   }
@@ -277,7 +279,7 @@ export function checkIn(ctx: WorkflowCtx, vehicleId: string, input: CheckInInput
   return withVehicleLock(ctx.env, vehicleId, async () => {
     const v = await getVehicleRow(ctx.env, vehicleId);
     assertStatus(v, ["announced"]);
-    const readings = validateReadings(v, input, false);
+    const readings = validateReadings(v, input);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, ctx.settings.min_photos_check_in, ctx.settings.signature_required_check_in);
     if (input.condition === "damaged" && input.damages.length === 0) throw badRequest("damage_description_required", { damages: "required" });
     const damagePhotos = await loadDamagePhotos(ctx, input.damages);
@@ -322,7 +324,7 @@ export function loanCheckout(ctx: WorkflowCtx, vehicleId: string, input: LoanChe
     assertStatus(v, ["available"]);
     if (await getActiveLoan(ctx.env, vehicleId)) throw conflict("active_loan");
     if (new Date(input.expected_return_at).getTime() <= Date.now()) throw badRequest("expected_return_past", { expected_return_at: "past" });
-    const readings = validateReadings(v, input, true);
+    const readings = validateReadings(v, input);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, ctx.settings.min_photos_loan, false);
 
     let company: { name: string; company_type: string } | null = null;
@@ -336,8 +338,26 @@ export function loanCheckout(ctx: WorkflowCtx, vehicleId: string, input: LoanChe
       if (!driver) throw badRequest("invalid_reference", { driver_id: "not_found" });
     }
 
-    const loanId = uid();
     const ts = now();
+    // A pre-reservation holds the vehicle for its window: this checkout fulfils the
+    // reservation it falls into, while somebody else's window has to be released
+    // first or overridden on purpose.
+    const planned = await overlapping(ctx.env, vehicleId, ts, input.expected_return_at);
+    let reservation: ReservationRow | null = null;
+    if (input.reservation_id) {
+      reservation = await getReservation(ctx.env, input.reservation_id);
+      if (reservation.vehicle_id !== v.id) throw badRequest("invalid_reference", { reservation_id: "not_found" });
+      if (reservation.status !== "planned") throw conflict("reservation_closed", { status: reservation.status });
+    } else {
+      reservation = planned.find((r) => r.starts_at <= ts) ?? null;
+    }
+    const clashes = planned.filter((r) => r.id !== reservation?.id);
+    if (clashes.length && !input.ignore_reservation) {
+      const w = formatWindow(clashes[0], ctx.lang);
+      throw conflict("reservation_conflict", { borrower: clashes[0].borrower_name, from: w.from, to: w.to });
+    }
+
+    const loanId = uid();
     const loanStatement = stmt(
       ctx.env.DB,
       `INSERT INTO loans (id, vehicle_id, company_id, driver_id, borrower_name, borrower_phone, borrower_email, status, checked_out_at, expected_return_at,
@@ -375,9 +395,16 @@ export function loanCheckout(ctx: WorkflowCtx, vehicleId: string, input: LoanChe
       party: { name: input.borrower_name, phone: input.borrower_phone, email: input.borrower_email, company: company?.name ?? null },
       loanSnapshot: { checked_out_at: ts, expected_return_at: input.expected_return_at },
       preStatements: [loanStatement],
+      extraStatements: reservation ? [fulfilStatement(ctx.env, reservation.id, loanId, ctx.user.id, ts)] : [],
       linkStatements: (protocolId) => [stmt(ctx.env.DB, "UPDATE loans SET checkout_protocol_id = ? WHERE id = ?", protocolId, loanId)],
       auditAction: "loan.checked_out",
-      auditDetails: { loan_id: loanId, borrower: input.borrower_name, expected_return_at: input.expected_return_at },
+      auditDetails: {
+        loan_id: loanId,
+        borrower: input.borrower_name,
+        expected_return_at: input.expected_return_at,
+        ...(reservation ? { reservation_id: reservation.id } : {}),
+        ...(clashes.length ? { overridden_reservations: clashes.map((r) => r.id) } : {}),
+      },
       sendCopyTo: copyRecipients(input.borrower_email, input.send_copy_to),
     });
     return result(ctx, vehicleId, p, loanId);
@@ -393,7 +420,7 @@ export function loanReturn(ctx: WorkflowCtx, vehicleId: string, input: LoanRetur
     assertStatus(v, ["loaned"]);
     const loan = await getActiveLoan(ctx.env, vehicleId);
     if (!loan) throw conflict("no_active_loan");
-    const readings = validateReadings(v, input, true);
+    const readings = validateReadings(v, input);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, ctx.settings.min_photos_return, ctx.settings.signature_required_return);
     if (input.condition === "damaged" && input.damages.length === 0) throw badRequest("damage_description_required", { damages: "required" });
     const damagePhotos = await loadDamagePhotos(ctx, input.damages);
@@ -447,7 +474,7 @@ export function checkOut(ctx: WorkflowCtx, vehicleId: string, input: CheckOutInp
     const v = await getVehicleRow(ctx.env, vehicleId);
     assertStatus(v, ["available", "damaged", "maintenance"]);
     if (await getActiveLoan(ctx.env, vehicleId)) throw conflict("active_loan");
-    const readings = validateReadings(v, input, true);
+    const readings = validateReadings(v, input);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, ctx.settings.min_photos_check_out, ctx.settings.signature_required_check_out);
     if (input.condition === "damaged" && input.damages.length === 0) throw badRequest("damage_description_required", { damages: "required" });
     const damagePhotos = await loadDamagePhotos(ctx, input.damages);
@@ -492,7 +519,7 @@ export function maintenanceStart(ctx: WorkflowCtx, vehicleId: string, input: Mai
     const v = await getVehicleRow(ctx.env, vehicleId);
     assertStatus(v, ["available", "damaged"]);
     if (await getActiveLoan(ctx.env, vehicleId)) throw conflict("active_loan");
-    const readings = validateReadings(v, input, false);
+    const readings = validateReadings(v, input);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, 0, false);
     const p = await commitProtocol(ctx, {
       vehicle: v,
@@ -517,7 +544,7 @@ export function maintenanceEnd(ctx: WorkflowCtx, vehicleId: string, input: Maint
   return withVehicleLock(ctx.env, vehicleId, async () => {
     const v = await getVehicleRow(ctx.env, vehicleId);
     assertStatus(v, ["maintenance"]);
-    const readings = validateReadings(v, input, false);
+    const readings = validateReadings(v, input);
     const { photos, signature } = await loadEvidence(ctx, input.photo_ids, input.signature_id, 0, false);
     const ts = now();
     // Only count damages that are really open for this vehicle, otherwise an unknown or

@@ -7,6 +7,7 @@ import { useT } from "../lib/i18n";
 import { fmtDate, fmtDateTime, fmtRelative } from "../lib/format";
 import { Card, EmptyState, ErrorBox, Loading, PageHeader, cx } from "../components/ui";
 import { VehicleCard } from "../components/VehicleCard";
+import { ReservationCard } from "./Reservations";
 
 function Stat({ label, value, to, tone }: { label: string; value: number; to: string; tone?: "red" | "amber" | "green" | "blue" | "slate" }) {
   const tones = {
@@ -57,7 +58,7 @@ export function DashboardPage() {
   if (q.isLoading) return <Loading />;
   if (q.error || !q.data) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;
-  const nothingToDo = !d.overdue.length && !d.due_soon.length && !d.attention.length && !d.arrivals.length && !d.return_due.length;
+  const nothingToDo = !d.overdue.length && !d.due_soon.length && !d.attention.length && !d.arrivals.length && !d.return_due.length && !d.reservations.length;
 
   return (
     <div className="space-y-5">
@@ -114,6 +115,13 @@ export function DashboardPage() {
         <Section title={t("dash.needs_attention")} count={d.attention.length} to="/vehicles?status=damaged,maintenance">
           {d.attention.map((v) => (
             <VehicleCard key={v.id} v={v} />
+          ))}
+        </Section>
+      )}
+      {d.reservations.length > 0 && (
+        <Section title={t("res.title")} count={d.reservations.length} to="/reservations">
+          {d.reservations.map((r) => (
+            <ReservationCard key={r.id} r={r} />
           ))}
         </Section>
       )}

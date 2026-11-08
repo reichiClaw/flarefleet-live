@@ -14,12 +14,25 @@ export interface SendResult {
   error?: string;
 }
 
+/** 25 MiB is the total message limit and base64 transport adds about a third. */
+export const MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
+
 function toBase64(bytes: Uint8Array): string {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   }
   return btoa(bin);
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+/** The local `wrangler dev` simulator cannot pass binary attachments through. */
+function cannotSerializeBinary(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  return /serializ|DataCloneError|could not be cloned|structured/i.test(`${e?.code ?? ""} ${e?.message ?? ""}`);
 }
 
 /** Sender address: the super-admin setting wins over the EMAIL_FROM var. */
@@ -58,8 +71,13 @@ export async function sendEmailDetailed(
   if (!from.includes("@")) return { ok: false, error: "no_sender" };
   const recipients = (Array.isArray(to) ? to : [to]).map((s) => s.trim()).filter(Boolean);
   if (!recipients.length) return { ok: false, error: "no_recipient" };
-  try {
-    await env.EMAIL.send({
+  const total = attachments.reduce((n, a) => n + a.content.byteLength, 0);
+  if (total > MAX_ATTACHMENT_BYTES) return { ok: false, error: "attachment_too_large" };
+
+  // Attachments go out as raw bytes: a base64 string is delivered as-is, so the
+  // recipient would get a text file with a .pdf name that no reader can open.
+  const send = (asBase64: boolean) =>
+    env.EMAIL!.send({
       to: recipients,
       from: { email: from, name: settings?.org_name || env.APP_NAME },
       subject,
@@ -68,12 +86,23 @@ export async function sendEmailDetailed(
       attachments: attachments.map((a) => ({
         filename: a.filename,
         type: a.type,
-        content: toBase64(a.content),
-        disposition: "attachment",
+        content: asBase64 ? toBase64(a.content) : toArrayBuffer(a.content),
+        disposition: "attachment" as const,
       })),
     });
+
+  try {
+    await send(false);
     return { ok: true };
   } catch (err) {
+    if (attachments.length && cannotSerializeBinary(err)) {
+      try {
+        await send(true);
+        return { ok: true };
+      } catch {
+        // fall through with the original error
+      }
+    }
     const e = err as { code?: string; message?: string };
     const error = e?.code || e?.message || String(err);
     console.error("email send failed", error);

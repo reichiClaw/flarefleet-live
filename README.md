@@ -28,6 +28,9 @@ Excel import ─▶ announced ─▶ check-in ─▶ available ─▶ loan ─�
 - **Check in** vehicles with meter readings, condition, damages and photos.
 - **Loan** vehicles from the pool to subcontractors or drivers with photos
   and optional signature; **return** them and document new damage.
+- **Reserve** a vehicle in advance for a known period (the Iveco is needed on
+  two days next week): planned windows are visible on the dashboard and block
+  each other, and the hand-over turns the reservation into a loan.
 - **Maintenance** and **damage** tracking with resolution protocols.
 - **Check out** vehicles to the manufacturer and archive them.
 - **Every step is protocolled**: immutable protocol snapshots, numbered PDF
@@ -282,6 +285,9 @@ Notes:
 - Failed protocol copies are recorded in the audit log as
   `protocol.email_failed` with the error code; the protocol itself is never
   blocked by a mail failure.
+- A whole message may not exceed 25 MiB. A protocol PDF above the attachment
+  limit is mailed as a download link instead, which the audit entry records as
+  `attached: false`.
 
 ### 6. Build and deploy
 
@@ -378,7 +384,7 @@ Deployments are atomic; users keep their sessions.
 | Export database | `npx wrangler d1 export flarefleet-db --remote --output backup.sql` |
 | Point-in-time restore | D1 Time Travel: `npx wrangler d1 time-travel restore flarefleet-db --timestamp=<ISO date>` (30 days on the free plan) |
 | Files | dashboard → R2 → `flarefleet-media` (keys: `photo/`, `signature/`, `pdf/`, `import/`, one folder per day) |
-| Scheduled jobs | hourly: retry pending/failed PDFs, purge staged uploads that were never attached; daily 06:00 UTC: overdue-loan digest. Sessions expire via KV TTL |
+| Scheduled jobs | hourly: retry pending/failed PDFs, purge staged uploads that were never attached, expire reservation windows that passed without a hand-over; daily 06:00 UTC: overdue-loan digest. Sessions expire via KV TTL |
 | Rotate all sessions | delete the keys with prefix `session:` in the KV namespace (dashboard → KV) |
 | Reset a locked-out super admin | `npx wrangler d1 execute flarefleet-db --remote --command "UPDATE users SET is_active=1, failed_logins=0, locked_until=NULL WHERE email='you@example.com'"` then use *Forgot password* (needs e-mail) or have another super admin reset it |
 
@@ -443,7 +449,13 @@ Useful scripts:
   its current status.
 - **Workflows** (check-in, loan, return, maintenance, check-out, correction)
   are four-step wizards: details → photos → condition/damages → confirm. Each
-  produces a numbered protocol with a PDF.
+  produces a numbered protocol with a PDF. Meter readings are optional
+  everywhere; only a reading below the last one or one the category has no
+  meter for is refused.
+- **Reservations**: plan a loan window per vehicle before the hand-over. A
+  checkout inside the window fulfils the reservation and prefills the
+  borrower; running into somebody else's window has to be confirmed. Windows
+  that pass without a hand-over expire by themselves.
 - **Scan**: point the phone camera at a QR label to jump to the vehicle.
 - **Documents**: all protocols with PDF download; failed PDFs can be
   regenerated.

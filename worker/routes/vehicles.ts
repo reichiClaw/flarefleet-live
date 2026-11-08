@@ -25,6 +25,7 @@ import { baseUrlFor, loadSettings } from "../lib/settings";
 import { qrSvg } from "../lib/qr";
 import { audit } from "../lib/audit";
 import { createVehicle, getVehicle, getVehicleRow, listLoansForVehicle, listVehicles, updateVehicle } from "../services/vehicles";
+import { listForVehicle } from "../services/reservations";
 import * as wf from "../services/workflows";
 import { toMediaItem, type MediaRow } from "../services/media";
 import { shapeProtocol, type ProtocolRowFull } from "./protocols";
@@ -61,6 +62,12 @@ vehicles.get("/:id/loans", async (c) => {
   const id = c.req.param("id");
   await getVehicleRow(c.env, id);
   return c.json({ results: await listLoansForVehicle(c.env, id) });
+});
+
+vehicles.get("/:id/reservations", async (c) => {
+  const id = c.req.param("id");
+  await getVehicleRow(c.env, id);
+  return c.json({ results: await listForVehicle(c.env, id, c.req.query("scope") === "planned") });
 });
 
 vehicles.get("/:id/protocols", async (c) => {
