@@ -82,6 +82,18 @@ export async function getReservation(env: Env, id: string): Promise<ReservationR
   return r;
 }
 
+/**
+ * Every list starts with the windows that are still ahead, soonest first, so the
+ * next hand-over is on top instead of at the end. Closed and passed ones follow
+ * as a history, most recent first, which is also what survives the row limit.
+ * The timestamp is server-made and goes in as a literal: the ORDER BY of a
+ * paginated query has nowhere to bind a parameter.
+ */
+function chronological(ts: string): string {
+  const open = `r.status = 'planned' AND r.ends_at >= '${ts}'`;
+  return `CASE WHEN ${open} THEN 0 ELSE 1 END, CASE WHEN ${open} THEN r.starts_at END, r.starts_at DESC`;
+}
+
 export function formatWindow(r: { starts_at: string; ends_at: string }, lang: Language): { from: string; to: string } {
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString(lang === "de" ? "de-DE" : "en-GB", { timeZone: "Europe/Berlin", dateStyle: "short", timeStyle: "short" });
@@ -114,19 +126,15 @@ export async function listReservations(env: Env, url: URL) {
     params.push(scope);
   }
   const sql = `${WITH_VEHICLE}${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
-  const res = await paginate<ReservationWithVehicleRow>(env.DB, sql, params, scope === "upcoming" ? "r.starts_at" : "r.starts_at DESC", page);
+  const res = await paginate<ReservationWithVehicleRow>(env.DB, sql, params, chronological(ts), page);
   return { ...res, results: res.results.map((r) => withVehicle(r, ts)) };
 }
 
-/**
- * Planned windows come soonest first, because callers treat the first row as the
- * next hand-over; the full list is a history and reads newest first.
- */
 export async function listForVehicle(env: Env, vehicleId: string, onlyPlanned = false): Promise<Reservation[]> {
   const ts = now();
   const rows = await all<ReservationRow>(
     env.DB,
-    `${RESERVATION_SELECT} WHERE r.vehicle_id = ?${onlyPlanned ? " AND r.status = 'planned' AND r.ends_at >= ?" : ""} ORDER BY ${onlyPlanned ? "r.starts_at" : "r.starts_at DESC"} LIMIT 50`,
+    `${RESERVATION_SELECT} WHERE r.vehicle_id = ?${onlyPlanned ? " AND r.status = 'planned' AND r.ends_at >= ?" : ""} ORDER BY ${chronological(ts)} LIMIT 50`,
     ...(onlyPlanned ? [vehicleId, ts] : [vehicleId]),
   );
   return rows.map((r) => toReservation(r, ts));

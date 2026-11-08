@@ -455,7 +455,9 @@ Useful scripts:
 - **Reservations**: plan a loan window per vehicle before the hand-over. A
   checkout inside the window fulfils the reservation and prefills the
   borrower; running into somebody else's window has to be confirmed. Windows
-  that pass without a hand-over expire by themselves.
+  that pass without a hand-over expire by themselves. Every list starts with
+  the next hand-over and reads chronologically; closed windows follow as a
+  history.
 - **Scan**: point the phone camera at a QR label to jump to the vehicle.
 - **Documents**: all protocols with PDF download; failed PDFs can be
   regenerated.

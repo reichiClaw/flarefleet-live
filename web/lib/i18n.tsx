@@ -303,6 +303,7 @@ const de: Dict = {
   "res.conflict": "Für diesen Zeitraum ist das Fahrzeug an {borrower} vorreserviert ({from} – {to}).",
   "res.ignore": "Trotzdem ausleihen",
   "res.vehicle_reserved": "{count} Vorreservierung(en)",
+  "res.next": "Nächste",
 
   "docs.title": "Protokolle",
   "docs.filter_type": "Typ",
@@ -738,6 +739,7 @@ const en: Dict = {
   "res.conflict": "The vehicle is reserved for {borrower} during this period ({from} – {to}).",
   "res.ignore": "Loan anyway",
   "res.vehicle_reserved": "{count} reservation(s)",
+  "res.next": "Next",
 
   "docs.title": "Protocols",
   "docs.filter_type": "Type",

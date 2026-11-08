@@ -126,7 +126,7 @@ export function VehicleDetailPage() {
         <button type="button" onClick={() => setParams({ tab: "reservations" })} className="mb-4 block w-full rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-left text-sm">
           <div className="font-semibold text-blue-900">{t("res.vehicle_reserved", { count: planned.length })}</div>
           <div className="text-blue-800">
-            {planned[0].borrower_name} · {fmtDateTime(planned[0].starts_at, lang)} → {fmtDateTime(planned[0].ends_at, lang)}
+            {t("res.next")}: {planned[0].borrower_name} · {fmtDateTime(planned[0].starts_at, lang)} → {fmtDateTime(planned[0].ends_at, lang)}
           </div>
         </button>
       )}
